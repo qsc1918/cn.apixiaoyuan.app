@@ -143,6 +143,13 @@ class LoginViewModel : ViewModel() {
             is LoginOutcome.Success -> {
                 loggedInUser = outcome.user
                 loggedIn = true
+                // 登录成功后异步补设备链（sid + ks_*）。
+                // 主域业务端点（切换子账号、batchGet 拿名字）需要 ks_*，
+                // 而登录只下发 sid。设备注册拿 ks_* 由 Set-Cookie 自动落盘。
+                // 不阻塞跳转：失败静默，下次切号/拉列表时 ensureRegistered 会重试。
+                viewModelScope.launch {
+                    cn.apixiaoyuan.app.core.auth.DeviceRegistrar.ensureRegistered()
+                }
             }
             LoginOutcome.NeedAuth -> errorMessage = "该账号需短信二次验证，请改用验证码登录"
             LoginOutcome.Banned -> errorMessage = "账号已被封禁"

@@ -13,6 +13,8 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.Call
 import retrofit2.http.Body
+import retrofit2.http.Field
+import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.Multipart
 import retrofit2.http.POST
@@ -52,16 +54,30 @@ interface LeoUserApiService {
     /**
      * 注册设备（旧版 `Call`）。
      *
-     * POST `/leo-auth/android/user-devices`，
-     * Query `device` + `deviceInfo`，返回 `Void`。
+     * POST `/leo-auth/android/user-devices`，**`@FormUrlEncoded`**，
+     * Field `device` + `deviceInfo`，返回 `Void`。
+     *
+     * ## 2026-09-27 修正：`@Field` 不是 `@Query`
+     *
+     * 此前误写成 `@Query("device")` / `@Query("deviceInfo")`。原版 smali 逐行
+     * （`LeoUserApiService.smali` / `LeoUserCenterApiService.smali`）是：
+     * ```smali
+     * .annotation runtime Lretrofit2/http/FormUrlEncoded; .end annotation
+     * .annotation runtime Lretrofit2/http/POST; value = "/leo-auth/android/user-devices"
+     * @Field("device")     Ljava/lang/String;
+     * @Field("deviceInfo") Ljava/lang/String;
+     * ```
+     * 设备注册是**表单 POST**，不是 query 参数。`ks_*` 由响应的 `Set-Cookie`
+     * 下发（`PersistentCookieJar` 自动落盘），返回体是空 `Void`。
      */
     @BaseUrl(BASE_LEO)
     @CheckNothing
     @GsonConverter
+    @FormUrlEncoded
     @POST("/leo-auth/android/user-devices")
     fun register(
-        @Query("device") device: String,
-        @Query("deviceInfo") deviceInfo: String,
+        @Field("device") device: String,
+        @Field("deviceInfo") deviceInfo: String,
     ): Call<Void>
 
     /**

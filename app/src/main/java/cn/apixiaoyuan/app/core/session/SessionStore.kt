@@ -111,24 +111,20 @@ object SessionStore {
     /**
      * 从标准 `Cookie` 请求头字符串导入 cookie（合并，同名覆盖）。
      *
-     * ## 2026-09-26 更正：主域**并不需要**设备链
+     * ## 2026-09-27 更正：主域**确实需要**设备链（sid + ks_*）
      *
-     * 旧注释称「主域需 `sid` + `ks_sess` + `ks_deviceid` 三件套、只能靠用户从
-     * 原版导入」—— **该结论已被实测推翻**。用本项目自身登录 cookie 直打主域
-     * 探针 `GET /leo-star/android/exercise/rank/pre-fetch`：
+     * 早先（2026-09-26）误判「主域不需要设备链」，依据是探针
+     * `GET /leo-star/android/exercise/rank/pre-fetch` 去掉 sid/ks_* 仍 200。
+     * **该探针是服务端路径白名单特例**（既不走认证也不走编码），不能代表主域。
      *
-     * | 携带的 cookie | 结果 |
-     * |---|---|
-     * | 完整（登录 cookie + sid/ks_*） | 200 |
-     * | **只留登录 cookie，去掉 sid 与全部 ks_*** | **200** |
-     * | 不带 | 401 |
+     * 用真实业务端点（`batchGet` / `switch`）实测：
+     *  - 缺 ks_* → 401 `x-block-by: leo-auth`（认证层挡）
+     *  - 有 ks_* → 417 `x-block-by: solar-encoder`（认证已过，卡传输层）
      *
-     * 即：**登录本身下发的 cookie 就够拿到主域权限**。主域业务端点报 417 是
-     * **只缺 `sign`（编码层）**，与认证无关（认证失败会是 401）。
-     *
-     * 因此账号页已移除「导入登录态」入口 —— 它是基于错误结论做的多余设计，
-     * 会让用户以为必须去原版抄 cookie。本方法保留为**应急通道**（例如切换
-     * 环境 / 排障时手工灌 cookie）。
+     * 而本项目登录只下发 `sid`，`ks_*` 需先调设备注册
+     * （`POST /leo-auth/android/user-devices`，见 [cn.apixiaoyuan.app.core.auth.DeviceRegistrar]）
+     * 由 Set-Cookie 下发。本方法保留为**应急通道**（例如切换环境 / 排障时
+     * 手工灌 cookie），也可用于从原版导入设备链。
      *
      * 域统一按 `yuanfudao.com` 写入（与原版 MMKV 形态一致），
      * 这样对 `ape-api` 与 `xyks` 两个子域同时生效。导入只覆盖同名项，

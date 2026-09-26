@@ -55,9 +55,34 @@ object DeviceFingerprint {
      */
     fun yfdU(): Long = cached ?: compute().also { cached = it }
 
+    /**
+     * 设备指纹 UUID 字符串（36 字符），复刻 `Lds/i3;->d()` 的返回值。
+     *
+     * 用途：设备注册接口 `POST /leo-auth/android/user-devices` 的 `device` 字段
+     * 明文是 `"leo-android-" + 本方法返回值`（再经 [PhoneEncoder.encode] RSA 加密）。
+     *
+     * 与 [yfdU] 同源 —— [yfdU] = MD5(本字符串) 前 8 字节大端 long。
+     * 单独暴露完整字符串，是因为设备注册要的是 UUID 本身，而不是它的 MD5 摘要。
+     */
+    fun fingerprintUuid(): String = fingerprintUuidCache ?: computeFingerprintUuid().also {
+        fingerprintUuidCache = it
+    }
+
+    /** [fingerprintUuid] 的缓存。 */
+    @Volatile
+    private var fingerprintUuidCache: String? = null
+
     /** 复刻 `Lds/i3;->d()` → `Lkv/f;->a()`。 */
     @SuppressLint("HardwareIds", "MissingPermission")
     private fun compute(): Long {
+        val fingerprint = computeFingerprintUuid()
+        // `Lkv/f;->a(String)`：MD5(指纹串) → 取前 8 字节大端拼 long
+        return md5First8BytesBigEndian(fingerprint)
+    }
+
+    /** 复刻 `Lds/i3;->d()`：拼 baseString → `UUID.nameUUIDFromBytes`。 */
+    @SuppressLint("HardwareIds", "MissingPermission")
+    private fun computeFingerprintUuid(): String {
         val baseString = buildString {
             // 段1
             append(Build.CPU_ABI).append('_').append(Build.CPU_ABI2)
@@ -79,13 +104,9 @@ object DeviceFingerprint {
                 .append(runCatching { Build.SERIAL }.getOrDefault("unknown")).append('_')
                 .append(androidId())
         }
-
         // UUID.nameUUIDFromBytes 等价于 MD5 后按 v3 格式加工；
         // 原版 `Lds/i3;->d()` 返回的正是这个 UUID 字符串。
-        val fingerprint = UUID.nameUUIDFromBytes(baseString.toByteArray(Charsets.UTF_8)).toString()
-
-        // `Lkv/f;->a(String)`：MD5(指纹串) → 取前 8 字节大端拼 long
-        return md5First8BytesBigEndian(fingerprint)
+        return UUID.nameUUIDFromBytes(baseString.toByteArray(Charsets.UTF_8)).toString()
     }
 
     /** `Settings.System.getString(cr, "android_id")`。 */

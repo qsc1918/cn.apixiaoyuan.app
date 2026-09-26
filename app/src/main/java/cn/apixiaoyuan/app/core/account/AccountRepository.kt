@@ -2,6 +2,7 @@ package cn.apixiaoyuan.app.core.account
 
 import cn.apixiaoyuan.app.core.auth.AuthRepository
 import cn.apixiaoyuan.app.core.auth.DeviceFingerprint
+import cn.apixiaoyuan.app.core.auth.DeviceRegistrar
 import cn.apixiaoyuan.app.core.auth.PhoneEncoder
 import cn.apixiaoyuan.app.core.model.LoginResponse
 import cn.apixiaoyuan.app.core.model.UserAccount
@@ -170,6 +171,10 @@ object AccountRepository {
      * @return 切换成功返回新的 userid；失败抛异常（含非 1 业务码）。
      */
     suspend fun switchTo(item: SubAccountItem): Long {
+        // 切换走主域 `/leo-gateway/android/accounts/switch`，需要设备链 sid + ks_*。
+        // 本项目登录只拿 sid，ks_* 必须先调设备注册接口拿（否则 401 leo-auth）。
+        // 幂等：已有 ks_deviceid 时直接返回 true，不重复注册。
+        DeviceRegistrar.ensureRegistered()
         val resp = ServiceLocator.subAccount.switchAccount(item.userId)
         check(resp.isSuccess) { "切换失败（code=${resp.code}）" }
         val newId = resp.body?.ytkUserId?.takeIf { it > 0 } ?: item.userId
