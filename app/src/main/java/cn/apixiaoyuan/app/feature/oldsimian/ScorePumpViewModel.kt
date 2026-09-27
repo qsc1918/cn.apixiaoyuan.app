@@ -56,8 +56,12 @@ class ScorePumpViewModel : ViewModel() {
     var loadingScore by mutableStateOf(false)
         private set
 
-    /** 当前分数（`curWeekScore`）。null = 还没读到。 */
+    /** 当前分数（周练经验 `curWeekExp`）。null = 还没读到。 */
     var currentScore by mutableStateOf<Int?>(null)
+        private set
+
+    /** 今日已获得积分（`todayObtainedPoints`）。null = 还没读到。 */
+    var todayPoints by mutableStateOf<Int?>(null)
         private set
 
     /** 读分数失败的原因。null = 无错误。 */
@@ -86,6 +90,10 @@ class ScorePumpViewModel : ViewModel() {
     /**
      * 刷新当前分数。
      *
+     * 读的是 `homepage.curWeekExp`（**练习经验**）—— 与刷分上报的记账口径一致；
+     * 不是 `rank/pre-fetch.curWeekScore`（那是排行榜分数，刷分不会动它，
+     * 用它会表现为「分数显示异常」）。
+     *
      * 失败时把原因写进 [scoreError]（UI 展示），**不清空** [currentScore] ——
      * 已经读到过分数的话，一次刷新失败不该让界面退回「—」。
      */
@@ -94,13 +102,13 @@ class ScorePumpViewModel : ViewModel() {
         loadingScore = true
         scoreError = null
         viewModelScope.launch {
-            val exp = runCatching { ExerciseRepository.fetchExp() }.getOrNull()
+            val home = runCatching { ExerciseRepository.fetchExerciseHomepage() }.getOrNull()
             loadingScore = false
-            val score = exp?.curWeekScore
-            if (score == null) {
+            if (home == null) {
                 scoreError = "读取当前分数失败（登录态失效或网络异常）"
             } else {
-                currentScore = score
+                currentScore = home.curWeekExp
+                todayPoints = home.todayObtainedPoints
             }
         }
     }

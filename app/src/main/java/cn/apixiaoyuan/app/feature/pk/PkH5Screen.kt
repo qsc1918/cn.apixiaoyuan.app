@@ -201,6 +201,17 @@ fun PkH5Screen(
                  * 原因见 [PkH5Proxy] 的 KDoc：项目那些头挂在 OkHttp 上，
                  * 而 H5 的请求是 WebView 自己发的，根本带不上。
                  *
+                 * ## ⚠️ 必须跳过主文档（2026-09-27 踩坑）
+                 *
+                 * `shouldInterceptRequest` 会拦**所有**请求，**包括 `pk.html` 本身**。
+                 * 若把主文档也代发，`WebResourceResponse` 必须完整还原响应头，
+                 * 否则会出现「页面显示网页源码」：
+                 *  - OkHttp 返回的 body 是**已解压**的，但响应头里还留着
+                 *    `Content-Encoding: gzip` → WebView 二次解压失败或当纯文本渲染；
+                 *  - `Content-Length` 是压缩前的长度，与实际不符；
+                 *  - `Content-Type` 若被改写，WebView 就不再按 HTML 解析。
+                 * 所以主文档**一律交回 WebView 自己加载**。
+                 *
                  * 任何异常都返回 null → 交回 WebView 原样发，**绝不影响页面加载**。
                  */
                 override fun shouldInterceptRequest(
@@ -208,6 +219,8 @@ fun PkH5Screen(
                     request: WebResourceRequest?,
                 ): WebResourceResponse? {
                     val req = request ?: return null
+                    // 主文档不代理：交给 WebView 原生加载（含其自身的压缩/编码处理）。
+                    if (req.isForMainFrame) return null
                     val method = req.method ?: return null
                     val url = req.url?.toString() ?: return null
                     if (!PkH5Proxy.shouldProxy(method, url)) return null
@@ -216,14 +229,20 @@ fun PkH5Screen(
                     val body = if (method.equals("GET", true)) null else readRequestBody(req)
                     val resp = PkH5Proxy.fetch(method, url, headers, body) ?: return null
                     return runCatching {
-                        // WebResourceResponse 的 headers 是 `Map<String, String>`（单值），
-                        // 而 OkHttp 给的是多值 map —— 取首值（Set-Cookie 等重复头对 H5 无意义）。
+                        // 只保留**内容语义相关**且已与实际 body 一致的头。
+                        //
+                        // 不能整包透传 OkHttp 的响应头：body 已被 OkHttp 解压，
+                        // 而 `Content-Encoding` / `Content-Length` 描述的是**传输态**，
+                        // 原样交给 WebView 会导致解码错乱（表现为显示源码 / 空白页）。
+                        val safeHeaders = resp.headers
+                            .filterKeys { it.equals("Content-Type", true) }
+                            .mapValues { (_, v) -> v.firstOrNull().orEmpty() }
                         WebResourceResponse(
                             resp.contentType,
                             "UTF-8",
                             resp.statusCode,
                             statusPhrase(resp.statusCode),
-                            resp.headers.mapValues { (_, v) -> v.firstOrNull().orEmpty() },
+                            safeHeaders,
                             resp.body,
                         )
                     }.getOrNull()

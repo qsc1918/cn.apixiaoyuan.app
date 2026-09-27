@@ -2,6 +2,7 @@ package cn.apixiaoyuan.app.core.exercise
 
 import cn.apixiaoyuan.app.core.model.ExamData
 import cn.apixiaoyuan.app.core.model.ExerciseEnglishSectionVO
+import cn.apixiaoyuan.app.core.model.ExerciseHomepageData
 import cn.apixiaoyuan.app.core.model.ExerciseScopeData
 import cn.apixiaoyuan.app.core.model.ExerciseType
 import cn.apixiaoyuan.app.core.model.LeoCurrentTaskInfo
@@ -73,6 +74,19 @@ object ExerciseRepository {
      */
     suspend fun fetchExp(): LeoUserCurrentExpData? = runCatching {
         ServiceLocator.exerciseLegacy.getCurrentUserExp()
+    }.getOrNull()
+
+    /**
+     * 拉练习星级首页（`/leo-star/android/exercise/homepage`）。
+     *
+     * **这是刷分真正该看的分数**：`postSavedExp`（= `rank/login/attend`）记的是
+     * **练习经验**，落在 `ExerciseHomepageData.curWeekExp` / `todayObtainedPoints`；
+     * 而 [fetchExp] 的 `curWeekScore` 是**周排行榜**分数，刷分不会让它变化。
+     *
+     * 该端点**不在** solar-encoder 的 417 名单里（真机实测恒 200），所以可用。
+     */
+    suspend fun fetchExerciseHomepage(): ExerciseHomepageData? = runCatching {
+        ServiceLocator.exerciseStar.getHomepage()
     }.getOrNull()
 
     /**

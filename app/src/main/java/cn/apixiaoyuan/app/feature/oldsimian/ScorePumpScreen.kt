@@ -89,8 +89,15 @@ fun ScorePumpScreen(
                 viewModel.scoreError?.let {
                     Text(text = it, color = MiuixTheme.colorScheme.error)
                 }
+                viewModel.todayPoints?.let {
+                    Text(
+                        text = "今日已得积分：$it",
+                        color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                    )
+                }
                 Text(
-                    text = "分数是本周分数（curWeekScore），由服务端按上报的增量记录累计。",
+                    text = "当前分数 = 本周练习经验（homepage.curWeekExp），" +
+                        "与刷分上报的记账口径一致；不是排行榜分数（rank/pre-fetch）。",
                     color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                 )
             }

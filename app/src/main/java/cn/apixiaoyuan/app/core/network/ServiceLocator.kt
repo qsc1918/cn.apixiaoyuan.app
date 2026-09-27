@@ -1,6 +1,7 @@
 package cn.apixiaoyuan.app.core.network
 
 import cn.apixiaoyuan.app.core.network.api.LeoEnglishExerciseWritingApiService
+import cn.apixiaoyuan.app.core.network.api.ExerciseStarApiService
 import cn.apixiaoyuan.app.core.network.api.LeoExerciseCommonLegacyApiService
 import cn.apixiaoyuan.app.core.network.api.LeoGatewayService
 import cn.apixiaoyuan.app.core.network.api.LeoMathApiService
@@ -51,6 +52,17 @@ object ServiceLocator {
 
     val exerciseLegacy: LeoExerciseCommonLegacyApiService by lazy {
         RetrofitFactory.leo(LeoExerciseCommonLegacyApiService::class.java)
+    }
+
+    /**
+     * 练习星级（`/leo-star/android/exercise/homepage`）。
+     *
+     * 刷分页的「当前分数」用它 —— `postSavedExp` 记的是**练习经验**，
+     * 对应 `curWeekExp`；`rank/pre-fetch` 那个 `curWeekScore` 是**排行榜**分数，
+     * 刷分不会动它（详见 [cn.apixiaoyuan.app.core.model.ExerciseHomepageData]）。
+     */
+    val exerciseStar: ExerciseStarApiService by lazy {
+        RetrofitFactory.leo(ExerciseStarApiService::class.java)
     }
 
     /** 数学练习（出题链路：`/leo-math/android/exams/exercises/type/{type}`）。 */

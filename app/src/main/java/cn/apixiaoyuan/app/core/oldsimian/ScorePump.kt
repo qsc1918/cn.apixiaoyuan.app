@@ -152,7 +152,7 @@ object ScorePump {
         return Result.success(after - (before ?: after))
     }
 
-    /** 读当前周分数（`curWeekScore`）；失败返回 null。 */
+    /** 读当前周练**经验**（`homepage.curWeekExp`）；失败返回 null。 */
     private suspend fun readScore(): Int? =
-        runCatching { ExerciseRepository.fetchExp()?.curWeekScore }.getOrNull()
+        runCatching { ExerciseRepository.fetchExerciseHomepage()?.curWeekExp }.getOrNull()
 }
