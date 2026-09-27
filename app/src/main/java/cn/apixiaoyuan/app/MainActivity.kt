@@ -109,8 +109,8 @@ private fun AppShell() {
     val tabs = remember {
         listOf(
             TabItem("首页", "Home"),
-            TabItem("接口", "Api"),
-            TabItem("请求台", "Terminal"),
+            TabItem("功能", "Api"),
+            TabItem("日志", "Terminal"),
             TabItem("设置", "Settings"),
         )
     }
@@ -166,8 +166,8 @@ private fun MainPager(
         ) { page ->
             when (page) {
                 0 -> HomeScreen(navController)
-                1 -> ApiScreen(navController)
-                2 -> ReplScreen(navController)
+                1 -> cn.apixiaoyuan.app.feature.oldsimian.OldSimianScreen(navController)
+                2 -> cn.apixiaoyuan.app.feature.log.LogScreen(navController)
                 else -> SettingsScreen(navController)
             }
         }

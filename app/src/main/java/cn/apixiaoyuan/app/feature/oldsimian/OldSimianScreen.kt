@@ -89,8 +89,15 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *    `"userId":0` 污染请求，必须新建专用 body 类。）
  */
 @Composable
-fun OldSimianScreen(navController: AppNavController) {
-    AppScrollScaffold(title = "老挂戏老叟", onBack = { navController.popBackStack() }) {
+fun OldSimianScreen(
+    navController: AppNavController,
+    title: String = "功能",
+    showBack: Boolean = false,
+) {
+    AppScrollScaffold(
+        title = title,
+        onBack = if (showBack) ({ navController.popBackStack() }) else null,
+    ) {
         Column(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {

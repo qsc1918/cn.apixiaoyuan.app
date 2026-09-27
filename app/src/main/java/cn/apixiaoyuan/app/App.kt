@@ -13,6 +13,8 @@ import cn.apixiaoyuan.app.core.network.NetworkConfig
 import cn.apixiaoyuan.app.core.auth.DeviceFingerprint
 import cn.apixiaoyuan.app.core.database.AppDatabase
 import cn.apixiaoyuan.app.core.design.theme.PageTransitionPrefs
+import cn.apixiaoyuan.app.core.log.AppLogger
+import cn.apixiaoyuan.app.core.log.CrashCatcher
 import cn.apixiaoyuan.app.core.native.NativeDecodeInstaller
 import cn.apixiaoyuan.app.core.native.NativeEncodeInstaller
 import cn.apixiaoyuan.app.core.oldsimian.OldSimianPrefs
@@ -70,6 +72,11 @@ class App : Application() {
         // 设备指纹：YFD_U 的取值来源（`Lds/i3` 链路复刻）。
         // 登录/发码接口都用它作设备级频控键，必须在任何登录动作之前就绪。
         DeviceFingerprint.init(this)
+
+        // 日志与崩溃捕获：尽早安装 —— 崩溃捕获要覆盖后续所有初始化；
+        // 日志目录也需在第一个网络请求（LoggingInterceptor 落盘）之前就绪。
+        AppLogger.init(this)
+        CrashCatcher.install(this)
 
         // 网络底座：必须先于任何 ServiceLocator.xxx 的首次访问。
         // 域名来自 NetworkConfig，由 mg/h.smali 的 d()/w() 方法链逐行确证。

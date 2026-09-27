@@ -198,11 +198,6 @@ fun SettingsScreen(navController: AppNavController) {
             // ---- 配置 ----
             SettingGroup(title = "配置") {
                 SettingRow(
-                    title = "老挂戏老叟",
-                    description = "练习代答 / 提交画笔 / 结算时间 / 刷分 / PK 自动化",
-                    onClick = { navController.navigate(RouteOldSimian) },
-                )
-                SettingRow(
                     title = "导出配置",
                     description = "将全部设置保存为 JSON 文件",
                     onClick = { exportLauncher("apixiaoyuan-config.json") },
