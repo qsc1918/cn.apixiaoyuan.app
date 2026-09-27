@@ -7,8 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.apixiaoyuan.app.core.network.BaseUrlRegistry
-import cn.apixiaoyuan.app.core.network.ServiceLocator
-import cn.apixiaoyuan.app.core.session.PersistentCookieJar
+import cn.apixiaoyuan.app.core.network.RetrofitFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -16,7 +15,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.concurrent.TimeUnit
 
 /**
  * 接口浏览器状态机。
@@ -30,28 +28,29 @@ import java.util.concurrent.TimeUnit
  *  3. 未落盘的第二批接口（诗词乐园、消息同步等）也能立刻在浏览器里试打，
  *     不需要先写 Kotlin 定义。
  *
- * 关键：**复用同一套 Interceptor 与 CookieJar**。这里自己 new 一个 OkHttpClient
- * 是错的——那样请求不会带登录 cookie，也不会走 BaseUrlInterceptor 重写 host。
- * 所以从 [ServiceLocator] 已初始化的 RetrofitFactory 里拿 client。
+ * ## 2026-09-27：改用应用统一的 OkHttp（待办 9）
  *
- * 实现细节：`RetrofitFactory` 当前没暴露 client 取值口，这里用一个轻量替代方案——
- * 直接用 [PersistentCookieJar] 构建一个**浏览器专用 client**，Interceptor 链
- * 只保留登录态注入所需的最小集。这与 RetrofitFactory 的 client 共享 CookieJar，
- * 因此登录态一致；差异是浏览器请求不走 `@NeedDecode` 拦截（这正是我们想要的，
- * 要看原始密文）。
+ * 此前这里自己 `new` 一个只挂 [PersistentCookieJar] 的「浏览器专用 client」，
+ * 结果是**请求不带公共 query / sign / 主域风控头** —— 在主域业务端点上必然被
+ * `solar-encoder` 417 拦掉，测出来的响应没有参考价值（当时的注释也承认这是
+ * 「RetrofitFactory 没暴露 client 取值口」的临时替代方案）。
+ *
+ * 现在 [RetrofitFactory.client] 已开放，直接复用它，语义与「应用自己发请求」
+ * 完全一致。安全性逐条核对过（详见 [RetrofitFactory.client] 的 KDoc）：
+ * 会改写请求/响应体的三个拦截器都以 `Invocation` tag 为前提，而控制台是手工
+ * 构造的 [Request]、没有 tag，因此**不会被误编码/误解码**，只会拿到
+ * sign / 风控头 / Cookie 这些「本来就该有」的东西。
  */
 class ApiViewModel : ViewModel() {
 
-    /** 浏览器专用 client：带 CookieJar，不带任何会改写响应体的 Interceptor。 */
-    private val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .cookieJar(PersistentCookieJar)
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .build()
-    }
+    /**
+     * 应用统一的 OkHttp 实例。
+     *
+     * 取的是 [RetrofitFactory.client] 的**同一个实例**（不是副本）：
+     * 连接池、CookieJar、Interceptor 链全部共享，所以控制台里发的请求与
+     * 应用业务请求走的是同一条路。
+     */
+    private val client: OkHttpClient by lazy { RetrofitFactory.client() }
 
     /** 搜索关键词。 */
     var keyword by mutableStateOf("")

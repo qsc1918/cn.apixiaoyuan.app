@@ -27,9 +27,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.border
+import cn.apixiaoyuan.app.BuildConfig
 import cn.apixiaoyuan.app.core.navigation.AppNavController
 import cn.apixiaoyuan.app.core.design.component.AppScrollScaffold
 import cn.apixiaoyuan.app.core.design.component.LocalScrollBottomLimit
@@ -41,6 +43,14 @@ import cn.apixiaoyuan.app.core.settings.AppConfig
 import cn.apixiaoyuan.app.core.settings.ConfigTransfer
 import com.materialkolor.dynamiccolor.ColorSpec
 import kotlinx.serialization.json.Json
+
+/**
+ * 项目 GitHub 地址。
+ *
+ * 写在文件级常量而不是塞进 `SettingRow` 的字面量：既是展示文案又是
+ * `LocalUriHandler.openUri` 的入参，两处必须一致，抽成常量避免改一处漏一处。
+ */
+private const val GITHUB_URL = "https://github.com/sxd91/cn.apixiaoyuan.app"
 
 /**
  * 设置页 —— 移植「老挂戏老叟」（cn.nizou.sxd）SettingsScreen 的主题 + 配置两段。
@@ -67,6 +77,9 @@ import kotlinx.serialization.json.Json
 fun SettingsScreen(navController: AppNavController) {
     // 导出/导入的结果提示。SAF 是异步回调，提示必须落在状态里。
     var transferHint by remember { mutableStateOf<String?>(null) }
+    // 「关于 → 项目地址」用系统浏览器打开。LocalUriHandler 在没有可处理
+    // 该 scheme 的应用时会抛 IllegalStateException，调用处已 runCatching。
+    val uriHandler = LocalUriHandler.current
 
     // SAF：导出 —— 让用户在系统文件管理器里选保存位置。
     val exportLauncher = rememberLauncherForCreateJson { uri ->
@@ -211,7 +224,27 @@ fun SettingsScreen(navController: AppNavController) {
 
             // ---- 关于 ----
             SettingGroup(title = "关于") {
-                SettingRow(title = "版本", description = "cn.apixiaoyuan.app")
+                // 版本号取自 BuildConfig，不再硬编码。
+                //
+                // 此前 description 写的是 "cn.apixiaoyuan.app"（包名），
+                // 用户看到的就是「版本：包名」，明显是错的。
+                // release 构建的 versionName 形如 `3.141.1-<gitShortHash>`
+                // （见 app/build.gradle.kts 的 versionNameSuffix），
+                // 所以这里显示的是「版本名 + 构建哈希」，能直接对上 CI 产物。
+                SettingRow(
+                    title = "版本",
+                    description = "${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）",
+                )
+                SettingRow(
+                    title = "项目地址",
+                    description = GITHUB_URL,
+                    onClick = {
+                        // 设备上没有可处理 https 的应用时 openUri 会抛，
+                        // 这里吞掉并给个提示，不让设置页崩。
+                        runCatching { uriHandler.openUri(GITHUB_URL) }
+                            .onFailure { transferHint = "打开链接失败：${it.message}" }
+                    },
+                )
             }
 
             transferHint?.let { hint ->

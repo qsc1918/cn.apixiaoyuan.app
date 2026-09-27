@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      深色模式下的窗口底色（待办 8）。
+
+      与 `values/colors.xml` 的同名项配对：系统处于深色时 Android 自动取这一份。
+      取的是中性深灰（不是纯黑）—— Compose 的 `surfaceContainer` 在深色下也不是
+      纯黑，纯黑会让「Compose 首帧之前」的那一瞬间显得像另一块背景。
+    -->
+    <color name="window_background">#FF121216</color>
+</resources>

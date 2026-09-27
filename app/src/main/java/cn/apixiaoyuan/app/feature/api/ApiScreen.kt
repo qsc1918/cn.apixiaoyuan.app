@@ -53,7 +53,13 @@ fun ApiScreen(
 ) {
     val selected = viewModel.selected
     if (selected == null) {
-        ApiListPane(viewModel)
+        ApiListPane(
+            viewModel = viewModel,
+            // 列表态是**二级页**（首页快捷入口 /「功能」Tab 都从这里进），
+            // 所以必须给返回键 —— 此前传 null，从首页点进来只能靠系统返回手势出去。
+            // 详情态的返回是「回列表」（viewModel.back()），不是出页，两者语义不同。
+            onBack = { navController.popBackStack() },
+        )
     } else {
         ApiDetailPane(viewModel, selected)
     }
@@ -61,8 +67,8 @@ fun ApiScreen(
 
 /** 列表态：按 group 分组的接口清单。 */
 @Composable
-private fun ApiListPane(viewModel: ApiViewModel) {
-    AppListScaffold(title = "接口浏览器", onBack = null) {
+private fun ApiListPane(viewModel: ApiViewModel, onBack: () -> Unit) {
+    AppListScaffold(title = "接口浏览器", onBack = onBack) {
         val grouped = viewModel.groupedResults
         grouped.forEach { (group, endpoints) ->
             item(key = "header-$group") {

@@ -3,4 +3,17 @@
     <!-- 启动器图标背景：深蓝紫，与白色笔形成对比。
          monochrome 层负责莫奈取色，背景保持品牌色。 -->
     <color name="ic_launcher_background">#1A1B2E</color>
+
+    <!--
+      窗口底色（`windowBackground`）。
+
+      只负责「Compose 首帧还没合成之前」露出的那一层（冷启动 / 转场边角），
+      页面真正的底色由 Compose 侧 `AppScaffold.containerColor`（莫奈取色的
+      surfaceContainer）决定。
+
+      此前窗口底色是纯黑，在深色页面下会露出明显色差，看起来像「scaffold
+      背后还有一块黑背景」。这里给浅色/深色各一个中性色（深色见
+      `values-night/colors.xml`），让露出的一瞬间与页面同调。
+    -->
+    <color name="window_background">#FFF7F7FA</color>
 </resources>

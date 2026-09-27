@@ -39,6 +39,28 @@ import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
+ * 顶栏渐变模糊**向下额外覆盖**的高度（2026-09-27，待办 7）。
+ *
+ * ## 为什么需要它
+ *
+ * 模糊层用 `matchParentSize` 撑满顶栏 Box，所以**模糊带有多高取决于顶栏 Box 多高**。
+ * 此前 Box 里只有 `SmallTopAppBar` 自己，模糊层高度 = 顶栏高度（statusBars +
+ * miuix `SmallTopAppBar` 中心高 50dp），顶栏下沿一到就立刻从「满强度模糊」跳到
+ * 「完全清晰」——「往下覆盖多一点」要抹平的正是这道硬边。
+ *
+ * 做法：在顶栏下方撑一段本值的 `Spacer`，让 Box 变高、模糊层随之向下延伸，
+ * `ProgressiveBlur.Top.copy(curve = 2.2f)` 的渐变带整体拉长，过渡更柔。
+ *
+ * ## 纪律：这 **不是** 内容下移
+ *
+ * 顶栏 Box 变高会让 `Scaffold` 的 `innerPadding.top` 跟着变大；若直接拿它当
+ * [LocalTopBarInset]，内容会被整体顶下去 `BlurOverhang` —— 那是错的。
+ * [AppScaffold] 里**显式减掉**这一段，使内容初始位置与改动前**完全一致**：
+ * 内容不动，只是顶部**多被模糊盖住**一段（对齐底部 tab 的局部处理思路）。
+ */
+private val BlurOverhang = 28.dp
+
+/**
  * 悬浮底栏的**滚动限位**高度。
  *
  * 由 `MainActivity.AppShell` 提供：底栏**显示时**为「底栏高 + 12dp 呼吸 + 手势条」，
@@ -93,19 +115,26 @@ fun AppScaffold(
     bottomInset: Dp = 24.dp,
     content: @Composable (PaddingValues) -> Unit,
 ) {
-    // 渐变模糊的采样层：先铺一层主题 surface 打底，再记录页面内容。
-    // 打底色的作用与 miuix 官方 example 的 rememberBlurBackdrop 一致 ——
-    // 内容未铺满时模糊区仍有稳定底色，不会透出下层黑底。
-    // 注意：surface 必须在 composable 上下文里先取出来，
-    // onDraw lambda 不是 @Composable，不能直接读 MiuixTheme.colorScheme。
-    val surfaceColor = MiuixTheme.colorScheme.surface
+    // 渐变模糊的采样层：先铺一层**与 Scaffold 容器同色**的打底，再记录页面内容。
+    //
+    // ## 为什么打底色必须与 containerColor 一致（2026-09-27 修正，待办 8）
+    //
+    // 此前打底用的是 `MiuixTheme.colorScheme.surface`，而 Scaffold 的
+    // `containerColor` 是 `MaterialTheme.colorScheme.surfaceContainer` ——
+    // 两者是**不同的色阶**（surface 是卡片层底色，surfaceContainer 是页面层底色）。
+    // 顶栏区域正好只采到打底那一层（内容还没滚上去时），于是顶栏看起来是
+    // 「另一块背景」，深色主题下尤其像一块黑底。
+    //
+    // 改成与 containerColor 同值后：顶栏模糊区的底色 == 页面底色，
+    // 视觉上只剩「磨砂过渡」，不再有分块感。
+    val surfaceColor = MaterialTheme.colorScheme.surfaceContainer
     val backdrop = rememberLayerBackdrop {
         drawRect(surfaceColor)
         drawContent()
     }
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = surfaceColor,
         topBar = {
             BlurredTopBar(
                 backdrop = backdrop,
@@ -134,9 +163,14 @@ fun AppScaffold(
         // 同理底栏高度也不进容器 padding（见 [LocalScrollBottomLimit]）。
         val barInset = LocalBottomBarInset.current
         val barExtra = if (barInset.isSpecified) barInset else 0.dp
+        // 顶栏 Box 因为 [BlurOverhang] 变高了，Scaffold 的 innerPadding.top 也随之
+        // 变大；这里把它减回去，内容初始位置与改动前一致 —— **只有模糊多盖一段，
+        // 内容一点不下移**。模糊不可用时顶栏 Box 里没有那段 Spacer，不减。
+        val topBarInset = (innerPadding.calculateTopPadding() - if (isRuntimeShaderSupported()) BlurOverhang else 0.dp)
+            .coerceAtLeast(0.dp)
         CompositionLocalProvider(
             LocalScrollBottomLimit provides barExtra,
-            LocalTopBarInset provides innerPadding.calculateTopPadding(),
+            LocalTopBarInset provides topBarInset,
         ) {
             Box(
                 Modifier
@@ -224,22 +258,29 @@ private fun BlurredTopBar(
                     )
             )
         }
-        SmallTopAppBar(
-            title = title,
-            modifier = Modifier.fillMaxWidth(),
-            // 支持模糊时透明，让下层的渐变模糊透出来；不支持时退回实色。
-            color = if (blurSupported) Color.Transparent else MiuixTheme.colorScheme.surface,
-            navigationIcon = {
-                if (onBack != null) {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = AppIcons.Back,
-                            contentDescription = "返回",
-                        )
+        // 下撑一段 [BlurOverhang]：模糊层是 matchParentSize，Box 变高它才跟着向下多盖一段。
+        // 这一段**只在模糊生效时**加；降级成实色顶栏时加它只会白占一条。
+        Column {
+            SmallTopAppBar(
+                title = title,
+                modifier = Modifier.fillMaxWidth(),
+                // 支持模糊时透明，让下层的渐变模糊透出来；不支持时退回实色。
+                color = if (blurSupported) Color.Transparent else MiuixTheme.colorScheme.surface,
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = AppIcons.Back,
+                                contentDescription = "返回",
+                            )
+                        }
                     }
-                }
-            },
-        )
+                },
+            )
+            if (blurSupported) {
+                Spacer(Modifier.height(BlurOverhang))
+            }
+        }
     }
 }
 

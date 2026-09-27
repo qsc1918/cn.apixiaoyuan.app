@@ -1,7 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+      应用主题（窗口级）。
+
+      ## windowBackground 不再用纯黑（2026-09-27，待办 8）
+
+      此前这里是 `@android:color/black`。Compose 内容铺满后它被盖住、看不见，
+      但在两个时刻会露出来：
+        1. **冷启动**：Activity 窗口先绘制 windowBackground，Compose 首帧还没合成；
+        2. **页面转场**：miuix-nav 的转场层若出现未覆盖的边角，露出的就是窗口底色。
+
+      「scaffold 背后不要有黑色背景」正是这个 —— 纯黑与 Compose 的
+      surfaceContainer 有明显色差，看起来像「另一块背景」。
+
+      改成中性深色（@color/window_background，另见 values-night）后，
+      启动/转场时露出的底色与 Compose 页面底色同调，不再突兀。
+      真正的页面底色仍由 Compose 侧 `AppScaffold.containerColor` 决定（那是
+      莫奈取色的结果），这里只负责「Compose 还没画出来之前」的那层底。
+
+      `windowLightStatusBar=false` / 透明状态栏与导航栏保持不变：内容要能一直
+      画到系统栏下面（edge-to-edge），顶栏的渐变模糊与底部液态玻璃才有东西可采。
+    -->
     <style name="Theme.ReverseOldGuy" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowBackground">@color/window_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>

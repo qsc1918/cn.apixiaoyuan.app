@@ -57,7 +57,19 @@ fun AppNavHost(
                 .background(backdropColor),
         ) {
             entry<RouteHome> { root() }
-            entry<RouteApi> { root() }
+            // 接口控制台（2026-09-27，待办 9）。
+            //
+            // 此前这里是 `entry<RouteApi> { root() }` —— 那是错的：`root()` 是整个
+            // 四 Tab 的 pager，从首页快捷入口点进来会把 pager 再套一层（两个底栏、
+            // 两份内容），所以这条路由实际上**从没被用作页面入口**，`ApiScreen`
+            // 也就一直不可达（只能从「功能」Tab 里的其它页面绕）。
+            // 现在改成像其它二级页一样渲染自己的页面，并给一个左滑返回。
+            entry<RouteApi>(swipeDismiss = NavSwipeDirection.LeftToRight) {
+                cn.apixiaoyuan.app.feature.api.ApiScreen(navController)
+            }
+            // RouteRepl / RouteSettings 只作「返回栈状态被系统恢复」时的安全兜底：
+            // 正常操作不会把这两个 key 压进栈（切 Tab 走 pager，不压栈），
+            // 保留 `root()` 是为了任何情况下栈里都有个能渲染的根。
             entry<RouteRepl> { root() }
             entry<RouteSettings> { root() }
             entry<RouteSamples>(swipeDismiss = NavSwipeDirection.LeftToRight) {

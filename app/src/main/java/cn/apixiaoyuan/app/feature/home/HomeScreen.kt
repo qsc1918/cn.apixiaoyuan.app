@@ -42,6 +42,7 @@ import cn.apixiaoyuan.app.core.design.icon.AppIcons
 import cn.apixiaoyuan.app.core.navigation.AppNavController
 import cn.apixiaoyuan.app.core.navigation.Route
 import cn.apixiaoyuan.app.core.navigation.RouteAccount
+import cn.apixiaoyuan.app.core.navigation.RouteApi
 import cn.apixiaoyuan.app.core.navigation.RouteExercise
 import cn.apixiaoyuan.app.core.navigation.RouteLogin
 import cn.apixiaoyuan.app.core.navigation.RoutePk
@@ -105,6 +106,9 @@ fun HomeScreen(navController: AppNavController) {
 
             val entries = listOf(
                 QuickEntry("登录", "Login", "账号域 cookie 登录", RouteLogin),
+                // 接口控制台提到首页快捷入口（待办 9）：它现在是「直接调用应用 okhttp」
+                // 的调试口，改完一个拦截器就要点一次，藏在「功能」tab 里来回切太慢。
+                QuickEntry("接口控制台", "Api", "直接调用应用 OkHttp 打接口", RouteApi),
                 QuickEntry("练习", "Exercise", "任务卡 / 经验 / 英语章节", RouteExercise),
                 QuickEntry("口算 PK", "Pk", "H5 容器 + cookie 同步", RoutePk),
                 QuickEntry("样本库", "Samples", "请求历史与回放", RouteSamples),
