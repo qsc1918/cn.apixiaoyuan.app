@@ -66,8 +66,25 @@ object AccountRepository {
      * 这正是本轮「小号没写出来」排查困难的直接原因之一，因此改为把失败
      * 连同原因一起交给上层展示。
      */
+    /**
+     * 回填当前用户信息（昵称 / 头像 / 年级）—— 账号域 `user-info`，**不需设备链**。
+     *
+     * PK H5 的 `getUserInfo` 桥读 [SessionStore] 的 `currentNickname` /
+     * `currentAvatarUrl` / `grade`；这些此前只在 `batchGet`（需设备链、417）成功时
+     * 才回填，导致 H5 首屏显示「我 / 0 级」= 未登录态。本方法用不需要设备链的
+     * 账号域接口兜底回填。
+     */
+    private suspend fun refreshCurrentUserProfile() {
+        val p = runCatching { ServiceLocator.ytkUserCenter.getUserProfile() }.getOrNull() ?: return
+        SessionStore.saveCurrentUserInfo(p.nickname, p.avatarUrl)
+        p.grade.takeIf { it > 0 }?.let { SessionStore.saveGrade(it) }
+    }
+
     suspend fun fetchSubAccounts(): Result<List<SubAccountItem>> = runCatching {
         val currentUid = SessionStore.yfdU?.toInt()
+
+        // 顺带回填当前用户信息（昵称/头像/年级），供 PK H5 的 getUserInfo 桥用。
+        refreshCurrentUserProfile()
 
         // 第一步：拿「有哪些子账号」—— 用 context（**不需要设备链**）。
         //

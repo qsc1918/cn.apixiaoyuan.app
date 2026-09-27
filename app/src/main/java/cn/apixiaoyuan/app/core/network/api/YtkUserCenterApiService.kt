@@ -40,6 +40,21 @@ import retrofit2.http.Query
  * 详见 `docs/API-INVENTORY.md`。
  */
 interface YtkUserCenterApiService {
+    /**
+     * 当前用户资料（账号域，**不需要设备链**）。
+     *
+     * `GET /profile/android/user-info` —— 2026-09-27 python 实测 200，
+     * 返回 `{userId, nickname, avatarId, grade}`。用于回填
+     * [cn.apixiaoyuan.app.core.session.SessionStore] 的当前用户信息，
+     * 供 PK H5 的 `getUserInfo` 桥使用（batchGet 需设备链、拿不到时用这条兜底）。
+     */
+    @BaseUrl(BASE_YTK)
+    @CheckNothing
+    @GsonConverter
+    @GET("/profile/android/user-info")
+    suspend fun getUserProfile(
+        @Query("YFD_U") yfdU: Long? = null,
+    ): cn.apixiaoyuan.app.core.model.UserProfileVO
 
     /**
      * 注销账号。
