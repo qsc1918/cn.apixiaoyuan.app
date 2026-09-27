@@ -89,6 +89,13 @@ class App : Application() {
             logging = BuildConfig.DEBUG,
         )
 
+        // 内容编解码桥：**必须最先初始化** —— 下面的解码桥/编码桥两个 Installer
+        // 都要检查 ContentBridge.isReady。此前把它放在最后，两个 Installer 跑在
+        // 它前面，必然拿到 isReady=false，真实编码器装不上 → EncodeBridge 一直是
+        // 恒等实现 → 提交（@NeedEncode）发出的仍是明文 JSON 却声明 octet-stream，
+        // 服务端 400 "error"。这是 PK 提交 400 的根因。
+        cn.apixiaoyuan.app.core.native.ContentBridge.init(this)
+
         // 解码桥：把 libContentEncoder.so 的真实解码器装进网络层 DecodeBridge。
         // 必须在 RetrofitFactory.init 之后 —— init 会构造 NeedDecodeInterceptor，
         // 而拦截器读取的是 DecodeBridge 这个全局单例；先装解码器再发第一个请求即可。
@@ -96,7 +103,7 @@ class App : Application() {
         NativeDecodeInstaller.install()
         // 编码桥：把 libContentEncoder.so 的真实编码器装进网络层 EncodeBridge。
         // 与解码桥同构 —— NeedEncodeInterceptor 读的也是全局单例，必须在
-        // 任何标注 @NeedEncode 的请求（练习成绩上传）发出之前就绪。
+        // 任何标注 @NeedEncode 的请求（练习成绩上传 / PK 提交）发出之前就绪。
         // 编码顺序为 gzip 压缩后再走 native c()，与解码侧完全互逆。
         NativeEncodeInstaller.install()
         // 签名计算器：加载内置 libRequestEncoder.so，按 JNI_OnLoad+0x4078 调 chain。
@@ -104,11 +111,6 @@ class App : Application() {
         // 依赖它给主域 URL 补 `sign`（缺 sign 一律 417 x-block-by: solar-encoder）。
         // so 加载失败时静默降级（不补 sign），不阻断启动。
         cn.apixiaoyuan.app.core.sign.SignComputer.init(this)
-        // 内容编解码桥：加载内置 libContentEncoder.so，按 JNI_OnLoad+0x1ecf0 调
-        // getEncodedP([B)[B。替代原先用 System.loadLibrary 的写法 ——
-        // 该 so 经 RegisterNatives 注册到 com/fenbi/.../imgsearch/sdk/utils/e，
-        // 本工程无此类，loadLibrary 必然失败（详见 ContentBridge 的 KDoc）。
-        cn.apixiaoyuan.app.core.native.ContentBridge.init(this)
 
         // 数据库：模块 12-13。八表实体 + SampleDao + AppDatabase。
         // 只建库不迁数据，初始化无副作用；放最后，不干扰网络与会话链路。
