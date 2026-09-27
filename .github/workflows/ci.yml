@@ -99,14 +99,18 @@ jobs:
       - name: Grant execute permission
         run: chmod +x gradlew
 
-      - name: Build release + unit tests (unsigned)
+      - name: Build release (unsigned)
         run: |
           set -euo pipefail
           VC=$(grep -oP '^versionCode=\K\d+' version.properties | head -1)
           VN=$(grep -oP '^versionName=\K.*' version.properties | head -1)
           echo "Building $VN (code $VC) — CI 不改版本号"
-          # 一条命令同时跑测试与打包：配置阶段只做一次（配置缓存命中后几乎为零）。
-          ./gradlew assembleRelease testDebugUnitTest --no-daemon \
+          # 只跑打包：本项目**没有测试源集**（`app/src` 下只有 `main`，
+          # 也没有任何 `testImplementation` 依赖），`testDebugUnitTest` 会
+          # 空跑一整套 Kotlin 编译 + 任务图，实测纯属浪费。
+          # 将来真的写了单测，把 `testDebugUnitTest` 加回这一行即可
+          # （加了之后它会被 `gradle/actions/setup-gradle` 的构建缓存覆盖，增量几乎为 0）。
+          ./gradlew assembleRelease --no-daemon \
             -PversionCode="$VC" -PversionName="$VN"
 
       - name: Collect APKs + ABI check + mapping
