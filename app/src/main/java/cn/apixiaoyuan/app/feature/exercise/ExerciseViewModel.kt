@@ -102,7 +102,7 @@ class ExerciseViewModel : ViewModel() {
             val sectionsDeferred = async {
                 ExerciseRepository.fetchEnglishSections(
                     type = DEFAULT_ENGLISH_TYPE,
-                    grade = DEFAULT_GRADE,
+                    grade = currentGrade(),
                     semester = DEFAULT_SEMESTER,
                     book = DEFAULT_BOOK,
                 )
@@ -157,7 +157,7 @@ class ExerciseViewModel : ViewModel() {
         viewModelScope.launch {
             val scope = ExerciseRepository.fetchMathScope(
                 type = selectedType,
-                grade = DEFAULT_GRADE,
+                grade = currentGrade(),
                 semester = DEFAULT_SEMESTER,
                 book = DEFAULT_BOOK,
             )
@@ -187,13 +187,35 @@ class ExerciseViewModel : ViewModel() {
         /** 英语练习类型：听写。原版 Int 枚举，取值待真机确认。 */
         private const val DEFAULT_ENGLISH_TYPE = 1
 
-        /** 年级：2。真机 UserVO.grade 实测值（`leo_user_info` 的 currentUserInfoStrKey）。 */
-        private const val DEFAULT_GRADE = 2
+        /**
+         * 年级兜底值。
+         *
+         * ⚠️ **只在会话里读不到年级时使用**（2026-09-27 修正，待办 2）。
+         *
+         * 此前这里被当成了「真机实测值」直接硬编码：grade=2。但本机真机的
+         * 实际年级是 **13**（`SessionStore.grade()`，登录/资料接口写入）。
+         * 拿 2 去问「13 年级孩子该练什么」，服务端自然给不出知识点 ——
+         * 真机日志里那条 `知识点拉取失败 type=0 grade=2` 就是它。
+         *
+         * 现在改为 [currentGrade]：优先读会话，读不到才落回这里（保留常量是为了
+         * 未登录时也发得出一个语法合法的请求，让错误来自服务端而不是客户端）。
+         */
+        private const val FALLBACK_GRADE = 2
 
         /** 学期：上学期。 */
         private const val DEFAULT_SEMESTER = 1
 
         /** 教材版本：默认版。 */
         private const val DEFAULT_BOOK = 1
+
+        /**
+         * 当前年级：会话里有就用会话的，否则落回 [FALLBACK_GRADE]。
+         *
+         * 年级决定「出哪些知识点」，用错年级的后果是知识点列表为空 ——
+         * 这正是待办 2「练习知识点拉取失败」的一半原因（另一半是主域 417）。
+         */
+        private fun currentGrade(): Int =
+            cn.apixiaoyuan.app.core.session.SessionStore.grade()?.takeIf { it > 0 }
+                ?: FALLBACK_GRADE
     }
 }
