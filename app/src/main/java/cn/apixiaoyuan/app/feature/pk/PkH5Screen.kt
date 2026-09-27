@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebResourceError
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import cn.apixiaoyuan.app.core.design.icon.AppIcons
+import cn.apixiaoyuan.app.core.oldsimian.PkH5Proxy
 import cn.apixiaoyuan.app.core.oldsimian.PkJsInjector
 import cn.apixiaoyuan.app.core.oldsimian.PkWebViewBridge
 import cn.apixiaoyuan.app.core.session.SessionStore
@@ -192,7 +194,41 @@ fun PkH5Screen(
                     val url = request?.url?.toString() ?: return false
                     return handleScheme(url, onFinish)
                 }
-                
+
+                /**
+                 * 主域业务请求改由原生代发（补公共参数 / sign / 风控头 / Cookie）。
+                 *
+                 * 原因见 [PkH5Proxy] 的 KDoc：项目那些头挂在 OkHttp 上，
+                 * 而 H5 的请求是 WebView 自己发的，根本带不上。
+                 *
+                 * 任何异常都返回 null → 交回 WebView 原样发，**绝不影响页面加载**。
+                 */
+                override fun shouldInterceptRequest(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                ): WebResourceResponse? {
+                    val req = request ?: return null
+                    val method = req.method ?: return null
+                    val url = req.url?.toString() ?: return null
+                    if (!PkH5Proxy.shouldProxy(method, url)) return null
+
+                    val headers = runCatching { req.requestHeaders.orEmpty() }.getOrDefault(emptyMap())
+                    val body = if (method.equals("GET", true)) null else readRequestBody(req)
+                    val resp = PkH5Proxy.fetch(method, url, headers, body) ?: return null
+                    return runCatching {
+                        // WebResourceResponse 的 headers 是 `Map<String, String>`（单值），
+                        // 而 OkHttp 给的是多值 map —— 取首值（Set-Cookie 等重复头对 H5 无意义）。
+                        WebResourceResponse(
+                            resp.contentType,
+                            "UTF-8",
+                            resp.statusCode,
+                            statusPhrase(resp.statusCode),
+                            resp.headers.mapValues { (_, v) -> v.firstOrNull().orEmpty() },
+                            resp.body,
+                        )
+                    }.getOrNull()
+                }
+
                 @Deprecated("Deprecated in API 24, but kept for older WebView")
                 override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
                     return url?.let { handleScheme(it, onFinish) } ?: false
@@ -472,6 +508,46 @@ private fun httpDate(epochMillis: Long): String =
     java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", java.util.Locale.US)
         .apply { timeZone = java.util.TimeZone.getTimeZone("GMT") }
         .format(java.util.Date(epochMillis))
+
+/**
+ * HTTP 状态码 → reason phrase。
+ *
+ * `WebResourceResponse` 的三参构造（statusCode + reasonPhrase + headers）要求给非空短语，
+ * 传空串会导致 WebView 侧解析异常（表现为资源加载失败）。
+ */
+private fun statusPhrase(code: Int): String = when (code) {
+    200 -> "OK"
+    201 -> "Created"
+    204 -> "No Content"
+    301 -> "Moved Permanently"
+    302 -> "Found"
+    304 -> "Not Modified"
+    400 -> "Bad Request"
+    401 -> "Unauthorized"
+    403 -> "Forbidden"
+    404 -> "Not Found"
+    417 -> "Expectation Failed"
+    429 -> "Too Many Requests"
+    500 -> "Internal Server Error"
+    502 -> "Bad Gateway"
+    503 -> "Service Unavailable"
+    else -> "HTTP $code"
+}
+
+/**
+ * 读取 WebView 请求体。
+ *
+ * `WebResourceRequest`（API 21）**不暴露请求体** —— 这是平台限制，无法绕过
+ * （`requestHeaders` 只有头，没有内容）。故统一返回 null，
+ * 由 [PkH5Proxy] 以空体发送。
+ *
+ * 当前无害：PK 首页与 `anti-addiction` 都是 **GET**（无 body）；
+ * 若将来 H5 出现「原生代发的 POST/PUT」，需要改用
+ * `shouldInterceptRequest` + `WebView.loadUrl(url, extraHeaders)` 之外的方案
+ * （例如在 JS 侧改走 `dataEncrypt` 桥）。
+ */
+@Suppress("UNUSED_PARAMETER")
+private fun readRequestBody(request: WebResourceRequest): ByteArray? = null
 
 /**
  * 拦截 `leo://` scheme。
