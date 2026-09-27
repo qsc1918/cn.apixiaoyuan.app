@@ -60,7 +60,11 @@ object AppLogger {
         }
         synchronized(lock) {
             buffer.addLast(line)
-            while (buffer.size > MAX_MEMORY_LINES) buffer.removeFirst()
+            // ⚠️ 不要用 `ArrayDeque.removeFirst()`：那是 **Java 21 新增方法，
+            // Android 上要求 API 35**，而本项目 minSdk=33 —— 在 33/34 机型上会
+            // `NoSuchMethodError` 崩溃（CI 的 lint 已对同类的 `removeLast()` 报错）。
+            // 用 `removeFirstOrNull()`（Kotlin 标准库扩展，全 API 可用）。
+            while (buffer.size > MAX_MEMORY_LINES) buffer.removeFirstOrNull()
         }
         // 同时打 logcat，便于 adb 侧排查（与文件日志互补）。
         runCatching { Log.println(levelToPriority(level), tag, msg) }
@@ -138,7 +142,15 @@ object AppLogger {
                 )
             } else if (line.isNotBlank() && out.isNotEmpty()) {
                 // 堆栈 / 续行：并入上一条，不丢信息。
-                val last = out.removeLast()
+                //
+                // ⚠️ 用「读 + 按下标删」而不是 `ArrayList.removeLast()`：
+                // 后者是 **Java 21 新增、Android 上要求 API 35**，而本项目 minSdk=33 ——
+                // CI 的 lint 直接报了 `NewApi` error（真会在 33/34 机型上
+                // `NoSuchMethodError` 崩）。`AppLogger.write` 本身在运行时也走
+                // `ArrayDeque.removeFirst()`（同为 Java 21 API），一起换掉。
+                val lastIdx = out.lastIndex
+                val last = out[lastIdx]
+                out.removeAt(lastIdx)
                 out.add(last.copy(message = last.message + "\n" + line))
             } else if (line.isNotBlank()) {
                 out.add(Entry(time = "", level = null, tag = null, message = line))
