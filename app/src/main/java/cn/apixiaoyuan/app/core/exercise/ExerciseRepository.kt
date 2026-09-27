@@ -131,6 +131,13 @@ object ExerciseRepository {
             semester = semester,
             book = book,
         )
+    }.onFailure {
+        // 失败不静默：记入日志页（含 HTTP 状态/异常），便于定位「知识点拉取失败」。
+        cn.apixiaoyuan.app.core.log.AppLogger.w(
+            "Exercise",
+            "知识点拉取失败 type=${type.exerciseType} grade=$grade semester=$semester book=$book: ${it.message}",
+            it,
+        )
     }.getOrNull()
 
     /**

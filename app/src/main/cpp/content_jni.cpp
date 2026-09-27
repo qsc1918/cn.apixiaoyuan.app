@@ -62,6 +62,22 @@ Java_cn_apixiaoyuan_app_core_native_ContentBridge_nativeInit(JNIEnv* env, jclass
         env->ReleaseStringUTFChars(jPath, path);
         return JNI_FALSE;
     }
+
+    // ★ 关键修复（2026-09-27，SIGSEGV @ libContentEncoder.so+0x3dc98）：
+    // dlopen **不会**调用 JNI_OnLoad（只有 System.loadLibrary / JVM 加载才会）。
+    // 该 so 的初始化（JNI_OnLoad 内）从未执行 → 内部全局状态为空 →
+    // 调 0x1ecf0 时踩空指针。这里手动调一次 JNI_OnLoad 完成初始化。
+    // （RegisterNatives 的目标类 com/fenbi/.../imgsearch/sdk/utils/e 本工程没有，
+    //   JNI_OnLoad 可能返回非 0；但初始化副作用已生效，返回值不影响后续调用。）
+    JavaVM* vm = nullptr;
+    if (env->GetJavaVM(&vm) == JNI_OK && vm != nullptr) {
+        typedef jint (*JNIOnLoadFn)(JavaVM*, void*);
+        jint r = ((JNIOnLoadFn)jni)(vm, nullptr);
+        LOGI("JNI_OnLoad -> %d", (int)r);
+    } else {
+        LOGI("GetJavaVM failed; JNI_OnLoad not called");
+    }
+
     g_fn = (GetEncodedPFn)((uintptr_t)jni + OFF_GET_ENCODED_P);
     LOGI("loaded: JNI_OnLoad=%p getEncodedP=%p", jni, (void*)g_fn);
     env->ReleaseStringUTFChars(jPath, path);
