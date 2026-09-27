@@ -6,6 +6,7 @@ import cn.apixiaoyuan.app.core.network.HeaderInterceptor
 import cn.apixiaoyuan.app.core.network.ShepherdId
 import cn.apixiaoyuan.app.core.session.SessionStore
 import cn.apixiaoyuan.app.core.sign.SignComputer
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -56,6 +57,58 @@ internal object PkH5Proxy {
 
     /** 业务主域根。 */
     private const val LEO_BASE = "https://$LEO_HOST"
+
+    /**
+     * H5 在「拿不到原生 requestConfig」时，会把 URL 模板里的
+     * `{client}` / `{device}` **字面量替换成 `api`**，而不是 `android`。
+     *
+     * ## 证据（2026-09-27 逐字读 H5 bundle，待办 10）
+     *
+     * `leo-web-oral-pk/assets/request-legacy.CdI7tZrH.js`（axios 请求拦截器）：
+     * ```js
+     * if (a() && f("3.42.0") && (d.indexOf("{device}")>=0 || d.indexOf("{client}")>=0)) {
+     *     s("requestConfig", {path:d, trigger:(r,t)=>{ e(r&&0!==r ? d : t.wrappedUrl) }}, "LeoSecure")
+     * } else if (d.indexOf("{device}")>=0 || d.indexOf("{client}")>=0) {
+     *     e(d.replace("{device}","api").replace("{client}","api"));   // ← 就是这里
+     * }
+     * ```
+     * 也即：**设备判定 `a()` 不成立时走 else 分支，模板被替成 `api`**。
+     * 真机实测（我们的 App）：`GET /leo-game-pk/api/math/pk/props/home → 417
+     * [x-block-by: solar-encoder]` —— 服务端要的是客户端标识 `android`，
+     * 收到 `api` 自然拒。
+     *
+     * ## 归属：这一层（原生代发）是**唯一正确的归正点**
+     *
+     * `{client}`/`{device}` 的取值在原版里就是 `android`
+     * （H5 内部枚举 `d.ANDROID = "android"`）。H5 之所以退化成 `api`，
+     * 是因为它没意识到自己跑在小猿口算 App 里；而**我们知道**。
+     * 所以当 H5 把 `/leo-game-pk/api/...` 交给我们代发时，直接按
+     * `android` 发才是「以真实身份发请求」。
+     *
+     * 不改 H5 只改这里，也避免了去逆 `a()` 那套设备判定。
+     */
+    private const val H5_FALLBACK_CLIENT = "api"
+
+    /** 原版客户端标识（`d.ANDROID`）。 */
+    private const val REAL_CLIENT = "android"
+
+    /**
+     * 允许被归正的**模块段**（`api` 段的前一段）。
+     *
+     * 白名单而不是「见到 `api` 就换」：H5 也打其它域名/路径，
+     * 万一某处 `api` 是真的路径段，误替换会打出错请求。
+     * 这些模块名取自 H5 bundle 里所有 `{client}` 模板的实际前缀。
+     */
+    private val CLIENT_SCOPED_MODULES = setOf(
+        "leo-game-pk",
+        "leo-star",
+        "leo-activity",
+        "leo-math",
+        "leo-english",
+        "leo-profile",
+        "leo-poetry",
+        "leo-chinese",
+    )
 
     /**
      * 代发用客户端。
@@ -144,19 +197,54 @@ internal object PkH5Proxy {
     }
 
     /**
-     * 给 H5 的 URL 补齐公共参数与 `sign`。
+     * 给 H5 的 URL 补齐公共参数与 `sign`，并把 `{client}` 退化产物 `api` 归正为 `android`。
      *
      * 公共参数与 `CommonQueryInterceptor` **同源**（那边供原生 Retrofit，这边供 H5），
      * 改一处记得改另一处。
      */
     private fun withSignAndCommonQuery(url: String): String {
         val parsed = url.toHttpUrlOrNull() ?: return url
-        val builder = parsed.newBuilder()
-        COMMON_PARAMS.forEach { (k, v) -> if (parsed.queryParameter(k) == null) builder.addQueryParameter(k, v) }
-        if (parsed.queryParameter(PARAM_SIGN) == null) {
-            SignComputer.sign(parsed.encodedPath)?.let { builder.addQueryParameter(PARAM_SIGN, it) }
+        val normalized = normalizeClientSegment(parsed)
+        val builder = normalized.newBuilder()
+        COMMON_PARAMS.forEach { (k, v) -> if (normalized.queryParameter(k) == null) builder.addQueryParameter(k, v) }
+        // sign 的输入是 encodedPath —— **必须在归正之后算**，否则签名与被请求的路径对不上。
+        if (normalized.queryParameter(PARAM_SIGN) == null) {
+            SignComputer.sign(normalized.encodedPath)?.let { builder.addQueryParameter(PARAM_SIGN, it) }
         }
         return builder.build().toString()
+    }
+
+    /**
+     * 把 `/leo-xxx/api/...` 这种「H5 退化路径」的客户端段归正为 `android`。
+     *
+     * 见 [H5_FALLBACK_CLIENT] 的 KDoc：H5 在拿不到原生 `requestConfig` 时，
+     * 会把 `{client}`/`{device}` 字面量替成 `api`，而服务端要的是 `android`。
+     *
+     * ## 判定规则（保守，宁可不改也不改错）
+     *
+     * 只替换**同时满足**下面两条的路径段：
+     *  1. 该段恰好是 `api`；
+     *  2. 它的前一段在我们的 [CLIENT_SCOPED_MODULES] 白名单里
+     *     （即形如 `/leo-game-pk/api/math/pk/props/home`）。
+     *
+     * 注意 `_appId` 等 query 参数**不受影响** —— 只动路径段。
+     */
+    private fun normalizeClientSegment(url: HttpUrl): HttpUrl {
+        val segments = url.pathSegments
+        var hit = -1
+        for (i in segments.indices) {
+            if (segments[i] == H5_FALLBACK_CLIENT &&
+                i > 0 &&
+                segments[i - 1] in CLIENT_SCOPED_MODULES
+            ) {
+                hit = i
+                break
+            }
+        }
+        if (hit < 0) return url
+        return url.newBuilder()
+            .setPathSegment(hit, REAL_CLIENT)
+            .build()
     }
 
     private val COMMON_PARAMS: List<Pair<String, String>> = listOf(

@@ -201,6 +201,15 @@ fun OldSimianScreen(
                     },
                 )
                 SwitchRow(
+                    title = "显示刷轮数悬浮入口",
+                    summary = "PK 页右下角显示「刷轮数」按钮（默认关：会压住 H5 按钮）",
+                    checked = OldSimianPrefs.pkGrindFloatingEntry,
+                    onCheckedChange = {
+                        OldSimianPrefs.pkGrindFloatingEntry = it
+                        OldSimianPrefs.persist()
+                    },
+                )
+                SwitchRow(
                     title = "自动提交画笔",
                     summary = "题目页自动注入笔迹并触发提交（遍历 Vue 组件树找活体画板）",
                     checked = OldSimianPrefs.pkStrokeEnabled,

@@ -53,6 +53,7 @@ object OldSimianPrefs {
     private const val KEY_PK_STROKE_ENABLED = "pk_stroke_enabled"
     private const val KEY_PK_STROKE_COUNT = "pk_stroke_count"
     private const val KEY_PK_STROKE_INTERVAL_MS = "pk_stroke_interval"
+    private const val KEY_PK_GRIND_FLOATING_ENTRY = "pk_grind_floating_entry"
 
     /**
      * 每题耗时的下限（毫秒）。与
@@ -272,6 +273,14 @@ object OldSimianPrefs {
     /** PK 自动提交画笔：两次提交间隔（毫秒）。 */
     var pkStrokeIntervalMs by mutableStateOf(PK_STROKE_INTERVAL_DEFAULT)
 
+    /**
+     * PK 页是否显示「刷轮数」悬浮入口（**默认关**，待办 11 重）。
+     *
+     * 该悬浮按钮固定在右下角，会压住 H5 自己的按钮（用户实测：挡事）。
+     * 改成默认隐藏，需要时在「老挂戏老叟 → PK」里打开。
+     */
+    var pkGrindFloatingEntry by mutableStateOf(false)
+
     /** 由 `App.onCreate` 调用。 */
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -300,6 +309,7 @@ object OldSimianPrefs {
             .coerceIn(PK_STROKE_COUNT_MIN, PK_STROKE_COUNT_MAX)
         pkStrokeIntervalMs = p.getInt(KEY_PK_STROKE_INTERVAL_MS, PK_STROKE_INTERVAL_DEFAULT)
             .coerceIn(PK_STROKE_INTERVAL_MIN, PK_STROKE_INTERVAL_MAX)
+        pkGrindFloatingEntry = p.getBoolean(KEY_PK_GRIND_FLOATING_ENTRY, false)
     }
 
     /** 写盘。设置页每次改动调用一次。 */
@@ -323,6 +333,7 @@ object OldSimianPrefs {
             .putBoolean(KEY_PK_STROKE_ENABLED, pkStrokeEnabled)
             .putInt(KEY_PK_STROKE_COUNT, pkStrokeCount)
             .putInt(KEY_PK_STROKE_INTERVAL_MS, pkStrokeIntervalMs)
+            .putBoolean(KEY_PK_GRIND_FLOATING_ENTRY, pkGrindFloatingEntry)
             .apply()
     }
 

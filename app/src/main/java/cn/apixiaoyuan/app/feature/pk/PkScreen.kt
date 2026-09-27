@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.apixiaoyuan.app.core.navigation.AppNavController
 import cn.apixiaoyuan.app.core.navigation.RouteHome
+import cn.apixiaoyuan.app.core.oldsimian.OldSimianPrefs
 
 /**
  * 口算 PK 入口页。
@@ -60,17 +61,22 @@ fun PkScreen(
             },
         )
 
-        // ---- 刷轮数入口（浮在 H5 上方）----
+        // ---- 刷轮数入口（浮在 H5 上方，**默认隐藏**）----
         //
         // PK 是 H5，H5 内部没有「秒结算/循环/并发」这些原生能力，所以入口只能
-        // 由原生侧提供。放右下角悬浮按钮，点击弹 [PkBattleDialog]。
-        TextButton(
-            onClick = { showBattle = true },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
-        ) {
-            Text("刷轮数", style = MaterialTheme.typography.labelLarge)
+        // 由原生侧提供。但它固定在右下角会压住 H5 自己的按钮 ——
+        // 用户实测反馈「挡事」，于是改成**默认隐藏**：
+        // 只在「老挂戏老叟 → PK → 显示刷轮数悬浮入口」打开时渲染
+        // （[OldSimianPrefs.pkGrindFloatingEntry]，默认 false）。
+        if (OldSimianPrefs.pkGrindFloatingEntry) {
+            TextButton(
+                onClick = { showBattle = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+            ) {
+                Text("刷轮数", style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
 

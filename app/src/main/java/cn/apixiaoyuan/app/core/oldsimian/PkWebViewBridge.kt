@@ -7,6 +7,7 @@ import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
+import cn.apixiaoyuan.app.core.log.AppLogger
 import cn.apixiaoyuan.app.core.native.ContentBridge
 import cn.apixiaoyuan.app.core.session.SessionStore
 import cn.apixiaoyuan.app.core.sign.SignComputer
@@ -102,17 +103,38 @@ class PkWebViewBridge(
     // ==================== 无前缀能力 ====================
 
     /**
-     * 用户信息 —— PK H5 首屏用户卡的**主要来源**。
+     * 用户信息 —— PK H5 首屏用户卡的**主要来源**，也是 H5 判定「是否已登录」的唯一依据。
      *
-     * 没有这个桥时 H5 拿不到用户信息 → 首屏只有「0 胜 | 胜率 0%」没有名字头像
-     * （真机症状：切年级触发 homepage 请求后才从响应兜底显示）。
-     * 数据读 [SessionStore] 的当前用户缓存（由主页子账号列表 / PK 入口数据回填）。
+     * ## 为什么这是「点开始 PK 提示未登录」的关键（2026-09-27 逐行读 H5，待办 10）
+     *
+     * `assets/useHomeModel-legacy.Bd8rSiW2.js` 的 store 初始化：
+     * ```js
+     * var j = l(false);   // isLogin
+     * var T = l(-1);      // userId
+     * var W = function(){ ... v() ... j.value = true; T.value = r.userId ?? -1; E.value = r.gradeId; }
+     * ```
+     * 即 **`isLogin` 只有在 `getUserInfo` 成功回调时才被置 true**。
+     * 而 H5 点「开始 PK」时（`NewHomeCard.A`）：
+     * ```js
+     * if (!(isLogin.value || unloginPkEnable.value)) { await s({loginTitle:"登录后开始PK"}); ... }
+     * ```
+     * → 于是出现「点开始 PK 弹登录」。
+     *
+     * ## 所以这里必须回**真实有效**的 userId
+     *
+     * 旧实现的取值链只有 `SessionStore.yfdU ?: 0L`：一旦会话缓存没被回填
+     * （例如用户直接从首页快捷入口进 PK、主页子账号列表还没拉到），
+     * 回的 `userId` 就是 0 → H5 视为未登录。
+     *
+     * 现在改成三级兜底（`yfdU` 缓存 → `userid` cookie → 0）。
+     * `userid` cookie 是服务端下发的**权威身份**，由登录/切换账号时写入，
+     * 比本地缓存更可靠；这也是「既然能拿到 cookie，软件也一定可以」的思路。
      */
     @JavascriptInterface
     fun getUserInfo(payload: String?) {
         val info = runCatching {
             JSONObject().apply {
-                put("userId", SessionStore.yfdU ?: 0L)
+                put("userId", resolveUserId())
                 put("userName", SessionStore.currentNickname ?: "我")
                 put("nickName", SessionStore.currentNickname ?: "我")
                 put("avatarUrl", SessionStore.currentAvatarUrl ?: "")
@@ -120,8 +142,26 @@ class PkWebViewBridge(
                 put("gradeId", SessionStore.grade() ?: 0)
             }
         }.getOrDefault(JSONObject())
+        // 诊断：H5 的 isLogin 完全由这里决定，回报内容必须可查。
+        AppLogger.d(
+            TAG_BRIDGE,
+            "getUserInfo → userId=${info.opt("userId")} grade=${info.opt("gradeId")}" +
+                " nickname=${if (info.optString("nickName").isBlank()) "空" else "有"}" +
+                " avatar=${if (info.optString("avatarUrl").isBlank()) "空" else "有"}",
+        )
         respond(payload, ok(info))
     }
+
+    /**
+     * 解析当前用户 ID：本地缓存 → `userid` cookie → 0。
+     *
+     * `userid` cookie 由服务端下发（登录 / 切换子账号时写入），
+     * 是比内存缓存更权威、更不容易缺失的一手来源。
+     */
+    private fun resolveUserId(): Long =
+        SessionStore.yfdU
+            ?: SessionStore.cookie("userid")?.toLongOrNull()
+            ?: 0L
 
     /**
      * 打开子页 —— 「开始PK」等点击的真正通路。
@@ -455,6 +495,9 @@ class PkWebViewBridge(
     }
 
     private companion object {
+        /** 桥的日志 tag（`getUserInfo` 回报内容要可查）。 */
+        const val TAG_BRIDGE = "PkWebViewBridge"
+
         /** 回调名候选键，顺序即优先级（`callback` 先于 `trigger`）。 */
         val CALLBACK_KEYS = arrayOf("callback", "trigger", "jsCallBack")
 
