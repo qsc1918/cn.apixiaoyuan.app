@@ -97,6 +97,103 @@ object AppLogger {
 
     fun read(file: File): String = runCatching { file.readText() }.getOrDefault("")
 
+    /**
+     * 结构化日志行。
+     *
+     * 从 `MM-dd HH:mm:ss.SSS L/TAG: msg` 形态的原始行里拆出三段，
+     * 供日志页做**按级别过滤 / 按关键字搜索 / 按 tag 过滤**。
+     * 拆不出来（多行堆栈、非标准行）时 [level] / [tag] 为 null，[raw] 仍是原文。
+     */
+    data class Entry(
+        val time: String,
+        val level: String?,
+        val tag: String?,
+        val message: String,
+    ) {
+        /** 原文（日志页需要展示与复制）。 */
+        val raw: String get() = buildString {
+            append(time)
+            if (level != null) append(' ').append(level)
+            if (tag != null) append('/').append(tag)
+            append(": ").append(message)
+        }
+    }
+
+    /** 行首形态：`09-27 18:31:02.123 I/Tag: msg`。 */
+    private val LINE_RE = Regex("""^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) ([A-Z])/([^:]+): (.*)$""")
+
+    /** 把一段日志文本解析为结构化行（多行堆栈会并入上一行）。 */
+    fun parse(text: String): List<Entry> {
+        val out = ArrayList<Entry>()
+        text.lineSequence().forEach { line ->
+            val m = LINE_RE.matchEntire(line)
+            if (m != null) {
+                out.add(
+                    Entry(
+                        time = m.groupValues[1],
+                        level = m.groupValues[2],
+                        tag = m.groupValues[3],
+                        message = m.groupValues[4],
+                    )
+                )
+            } else if (line.isNotBlank() && out.isNotEmpty()) {
+                // 堆栈 / 续行：并入上一条，不丢信息。
+                val last = out.removeLast()
+                out.add(last.copy(message = last.message + "\n" + line))
+            } else if (line.isNotBlank()) {
+                out.add(Entry(time = "", level = null, tag = null, message = line))
+            }
+        }
+        return out
+    }
+
+    /**
+     * 结构化查询运行日志（**待办 4**：更详细的日志系统）。
+     *
+     * 数据源优先内存缓冲（当天的、最新的），为空时退回最新运行日志文件 ——
+     * 这样「刚启动、文件还没写」和「内存被环形缓冲截断」两种情况都能看到内容。
+     *
+     * @param levels   级别白名单（如 `setOf("W","E")`）；空集 = 不过滤
+     * @param tagQuery tag 子串（忽略大小写）；空白 = 不过滤
+     * @param keyword  正文子串（忽略大小写，匹配 message + tag）；空白 = 不过滤
+     * @param limit    最多返回多少条（取**最新**的 N 条）
+     */
+    fun query(
+        levels: Set<String> = emptySet(),
+        tagQuery: String = "",
+        keyword: String = "",
+        limit: Int = DEFAULT_QUERY_LIMIT,
+    ): List<Entry> {
+        val text = synchronized(lock) { buffer.joinToString("\n") }
+            .ifBlank { runFiles().firstOrNull()?.let { read(it) }.orEmpty() }
+        var list = parse(text)
+        if (levels.isNotEmpty()) list = list.filter { it.level in levels }
+        if (tagQuery.isNotBlank()) {
+            list = list.filter { it.tag?.contains(tagQuery, ignoreCase = true) == true }
+        }
+        if (keyword.isNotBlank()) {
+            list = list.filter {
+                it.message.contains(keyword, ignoreCase = true) ||
+                    it.tag?.contains(keyword, ignoreCase = true) == true
+            }
+        }
+        return list.takeLast(limit)
+    }
+
+    /** 出现过的 tag（按出现次数倒序），供日志页做 tag 筛选。 */
+    fun knownTags(limit: Int = 40): List<String> {
+        val text = synchronized(lock) { buffer.joinToString("\n") }
+        return parse(text)
+            .mapNotNull { it.tag }
+            .groupingBy { it }.eachCount()
+            .entries.sortedByDescending { it.value }
+            .take(limit)
+            .map { it.key }
+    }
+
+    /** 查询默认上限（条）。超过就只看最近的，避免一次性渲染几万行。 */
+    const val DEFAULT_QUERY_LIMIT = 3000
+
     /** 清空运行日志（内存 + 文件）。 */
     fun clearRun(): Int {
         var n = 0
