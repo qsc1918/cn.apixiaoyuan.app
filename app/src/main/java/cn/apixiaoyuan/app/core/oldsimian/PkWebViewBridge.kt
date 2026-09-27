@@ -9,6 +9,8 @@ import android.webkit.WebView
 import android.widget.Toast
 import cn.apixiaoyuan.app.core.native.ContentBridge
 import cn.apixiaoyuan.app.core.session.SessionStore
+import cn.apixiaoyuan.app.core.sign.SignComputer
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -17,25 +19,61 @@ import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
 /**
- * PK H5 的原生桥 —— 注入为 `window.WebView` 与 `window.LeoSecureWebView`。
+ * PK H5 的原生桥 —— 同一实例注册为 `window.WebView` / `window.CommonWebView` /
+ * `window.LeoWebView` / `window.LeoSecureWebView`。
  *
- * ## 协议（记忆「H5 ↔ 原生桥协议」逐字取证，非推测）
+ * ## 协议（2026-09-27 本地复现逐项实测，非推测）
  *
- * H5 调用：`window.WebView[能力](b64)`，payload =
- * `btoa(JSON.stringify({method, params:{arguments:[...], callback:"<回调名>"}}))`。
- * 原生必须在**同一个 window** 上回调：`window['<回调名>']('<base64结果>')`，
- * 结果约定为 JSON 数组 `[err, data...]`（err 为 null 表成功）。
+ * 复现方式：Playwright + Chromium 打开线上 `pk.html`，stub 掉桥后抓全部桥调用，
+ * 直到页面渲染出**带真实昵称与战绩的登录态首页**（脚本见对话记录）。结论：
  *
- * 回调名优先读 `params.callback`，其次扫 `arguments[0]` 里的 `trigger` /
- * `callback` 字符串字段（H5 把函数参数序列化成回调名注册到 window）。
+ * ### 1) H5 选哪一个对象 = 方法前缀决定
  *
- * ## 为什么要注入两个名字
+ * ```
+ * 无前缀        → window.WebView.<method>(b64)
+ * common_xxx   → window.CommonWebView.<method>(b64)     … 不存在则退回 ②
+ * leo_xxx      → window.LeoWebView.<method>(b64)        … 不存在则退回 ②
+ * LeoSecure_xx → window.LeoSecureWebView.<method>(b64)  … 不存在则退回 ②
+ * ```
  *
- * H5 的桥层按「有无前缀」选对象：
- *  - 无前缀能力（openWebView / getUserInfo / toast …）→ `window.WebView[cap]`；
- *  - LeoSecure 前缀能力（dataEncrypt / dataDecrypt / requestConfig）→
- *    `window.LeoSecureWebView[cap]`。
- * 同一个实例注册两个名字即可全覆盖，不用维护两份逻辑。
+ * ### 2) 通道①（能力调用）的 payload
+ *
+ * ```
+ * b64( {"arguments":[ {...} ], "callback":"__Oldcallback__"} )
+ * ```
+ * —— 注意 `arguments` / `callback` 在**顶层**，不在 `params` 里。
+ *
+ * ### 3) 通道②（通用调用）的 payload
+ *
+ * ```
+ * window.LeoWebView.callNative( b64( {"method":"common_getUserInfo",
+ *                                     "params":{"trigger":"getUserInfo_<ts>_<n>"}} ) )
+ * ```
+ * 前缀方法的兜底通道，**本项目必须实现**：`common_getUserInfo` 只走这里。
+ *
+ * ### 4) 回调（原生 → H5）
+ *
+ * ```
+ * window['<回调名>']( b64( JSON.stringify([ err, data ]) ) )
+ * ```
+ *  - `<回调名>` = 通道①的顶层 `callback`，或通道②的 `params.trigger` / `params.jsCallBack`；
+ *  - payload 必须是 **base64 字符串**：H5 侧 `pt()` = `new Buffer(t,'base64').toString()`
+ *    再 `JSON.parse`；
+ *  - 数组首元素非空即视为错误（H5 会 reject）；
+ *  - 回调名是 H5 注册在 window 上的函数，**名字带随机后缀，必须原样回**。
+ *
+ * ### 5) requestConfig（首屏数据的关键）
+ *
+ * H5 自己发的每个请求，URL 里的 `{client}`/`{device}` 占位符要先问原生：
+ * ```
+ * se("requestConfig", { path: "/leo-game-pk/{client}/math/pk/home" }, "LeoSecure")
+ *   → window.LeoSecureWebView.requestConfig( b64({arguments:[{path}], callback}) )
+ * ← [null, { "wrappedUrl": "https://xyks.yuanfudao.com/leo-game-pk/android/..." }]
+ * ```
+ * H5 拿到 `wrappedUrl` 后**自己 axios 发**（带 cookie）。
+ * 所以原生这里必须把**公共参数与 `sign` 一并算好**，否则 H5 侧会 417
+ * （实测：只补 `_productId/_appId/platform/version` 时 pk/home 200、
+ *  `activity/pk/daily/award` 与 `math/pk/props/home` 均 417）。
  *
  * ## dataEncrypt / dataDecrypt（ds/i4 语义，2026-09-26 钉死）
  *
@@ -154,8 +192,7 @@ class PkWebViewBridge(
     @JavascriptInterface
     fun dataEncrypt(payload: String?) {
         val out = runCatching {
-            val json = JSONObject(decodePayloadJson(payload).orEmpty())
-            val raw = decodeFlexibleBase64(json.getString("base64"))
+            val raw = decodeFlexibleBase64(firstArgObj(payload)?.optString("base64").orEmpty())
             val mid = ContentBridge.encode(gzip(raw)) ?: error("ContentBridge 未就绪")
             b64(mid)
         }.getOrNull()
@@ -169,18 +206,72 @@ class PkWebViewBridge(
     @JavascriptInterface
     fun dataDecrypt(payload: String?) {
         val out = runCatching {
-            val json = JSONObject(decodePayloadJson(payload).orEmpty())
-            val raw = decodeFlexibleBase64(json.getString("base64"))
+            val raw = decodeFlexibleBase64(firstArgObj(payload)?.optString("base64").orEmpty())
             val mid = ContentBridge.encode(raw) ?: error("ContentBridge 未就绪")
             b64(gunzip(mid))
         }.getOrNull()
         respond(payload, if (out != null) ok(JSONObject().put("result", out)) else err("decrypt failed"))
     }
 
-    /** requestConfig（加签 + 公共参数）。PK 页不需要，回成功避免 Promise 悬挂。 */
+    /**
+     * requestConfig —— 给 H5 的请求 URL 做**模板解析 + 补公共参数 + 加签**。
+     *
+     * 首屏数据的关键：H5 自己不直接请求业务接口，而是拿这里返回的 `wrappedUrl`
+     * 再去 axios（所以它拿到的 URL 里必须已经带好 `sign`，否则敏感端点 417）。
+     *
+     * 实测（本地复现）：若这里只回空对象，PK 首页只有「一年级 / 0 胜 / 胜率 0%」；
+     * 正确回 `{wrappedUrl}` 后，`/leo-game-pk/android/math/pk/home` 等返回 200，
+     * 页面渲染出昵称与真实战绩。
+     */
     @JavascriptInterface
     fun requestConfig(payload: String?) {
-        respond(payload, ok())
+        val path = firstArgObj(payload)?.optString("path")
+        val wrapped = path?.takeIf { it.isNotBlank() }?.let { resolveWrappedUrl(it) }
+        respond(
+            payload,
+            if (wrapped != null) ok(JSONObject().put("wrappedUrl", wrapped)) else ok(),
+        )
+    }
+
+    /** 通道② —— 带前缀方法（`common_*` / `leo_*` / `LeoSecure_*`）的兜底入口。 */
+    @JavascriptInterface
+    fun callNative(payload: String?) {
+        val json = runCatching { JSONObject(decodePayloadJson(payload).orEmpty()) }.getOrNull()
+        // H5 在兜底通道里传的是**带前缀**的方法名（如 common_getUserInfo）。
+        val method = json?.optString("method").orEmpty().substringAfter('_')
+        val params = json?.optJSONObject("params") ?: JSONObject()
+
+        // 合成与通道①等价的 payload，复用已有能力实现与[extractCallback]。
+        val synth = JSONObject().apply {
+            put(
+                "params",
+                JSONObject().apply {
+                    put(
+                        "callback",
+                        params.optString("jsCallBack").takeIf { it.isNotBlank() }
+                            ?: params.optString("trigger"),
+                    )
+                    put("arguments", JSONArray().put(params))
+                },
+            )
+        }
+        val p = b64(synth.toString())
+
+        when (method) {
+            "getUserInfo" -> getUserInfo(p)
+            "getDeviceInfo" -> getDeviceInfo(p)
+            "getImmerseStatusBarHeight" -> getImmerseStatusBarHeight(p)
+            "requestConfig" -> requestConfig(p)
+            "dataEncrypt" -> dataEncrypt(p)
+            "dataDecrypt" -> dataDecrypt(p)
+            "openWebView" -> openWebView(p)
+            "closeWebView" -> closeWebView(p)
+            "toast" -> toast(p)
+            // 其余（getOrionConfig / getFeatureConfig / addFrog / setTitle /
+            // scrollStateChanged 之类）H5 不依赖返回值，回成功即可，
+            // 关键是**必须回调**，否则那几个 Promise 会一直挂着。
+            else -> respond(p, ok())
+        }
     }
 
     // ==================== 内部工具 ====================
@@ -222,25 +313,101 @@ class PkWebViewBridge(
         }
     }
 
-    /** 回调名：`params.callback` 优先，其次 `arguments[i].trigger / .callback`。 */
+    /**
+     * 规范化入参对象。
+     *
+     * 两条通道 payload 结构不同：
+     *  - 通道①（能力调用）：`{ arguments:[...], callback:"..." }` —— 字段在**顶层**；
+     *  - 通道②（callNative）：`{ method:"...", params:{...} }` —— 字段在 `params` 里。
+     * 统一成一个对象，下游只认这一种。
+     */
+    private fun paramsOf(payload: String?): JSONObject? = runCatching {
+        val json = JSONObject(decodePayloadJson(payload) ?: return@runCatching null)
+        json.optJSONObject("params") ?: json
+    }.getOrNull()
+
+    /** 入参数组（通道①顶层 `arguments` / 通道② `params.arguments`）。 */
+    private fun argsOf(payload: String?): JSONArray? = paramsOf(payload)?.optJSONArray("arguments")
+
+    /** 第一个对象型实参；没有则退回参数对象本身。 */
+    private fun firstArgObj(payload: String?): JSONObject? {
+        val args = argsOf(payload)
+        if (args != null) {
+            for (i in 0 until args.length()) args.optJSONObject(i)?.let { return it }
+        }
+        return paramsOf(payload)
+    }
+
+    /**
+     * 回调名 —— 原生回 H5 时必须调回 window 上**同名**函数。
+     *
+     * 依次找：`callback` → `trigger` → `jsCallBack`，两层都看
+     * （通道②在 `params` 上，通道①在顶层），再兜 `arguments[i]` 上的串字段。
+     * 顺序不能反：通道①顶层同时有 `callback:"__Oldcallback__"`，
+     * 而 `arguments[0].trigger` 可能是别的东西。
+     */
     private fun extractCallback(payload: String?): String? = runCatching {
         val json = JSONObject(decodePayloadJson(payload) ?: return@runCatching null)
-        val params = json.optJSONObject("params") ?: return@runCatching null
-        params.optString("callback").takeIf { it.isNotBlank() && it != "null" }?.let { return@runCatching it }
-        val args = params.optJSONArray("arguments") ?: return@runCatching null
-        for (i in 0 until args.length()) {
-            val a = args.optJSONObject(i) ?: continue
-            a.optString("trigger").takeIf { it.isNotBlank() && it != "null" }?.let { return@runCatching it }
-            a.optString("callback").takeIf { it.isNotBlank() && it != "null" }?.let { return@runCatching it }
+        val layers = buildList {
+            json.optJSONObject("params")?.let { add(it) }
+            add(json)
+        }
+        for (layer in layers) {
+            for (key in CALLBACK_KEYS) {
+                layer.optString(key).takeIf { it.isNotBlank() && it != "null" }
+                    ?.let { return@runCatching it }
+            }
+            val args = layer.optJSONArray("arguments") ?: continue
+            for (i in 0 until args.length()) {
+                val a = args.optJSONObject(i) ?: continue
+                for (key in CALLBACK_KEYS) {
+                    a.optString(key).takeIf { it.isNotBlank() && it != "null" }
+                        ?.let { return@runCatching it }
+                }
+            }
         }
         null
     }.getOrNull()
 
+    /**
+     * 把 H5 的 URL 模板补成可直接请求的绝对地址（模板占位符 + 公共参数 + sign）。
+     *
+     * 公共参数与 [cn.apixiaoyuan.app.core.network.CommonQueryInterceptor] **同源**：
+     * 那边供原生 Retrofit 请求用，这边供 H5 自己发请求用，两处必须一致
+     * （原版也是同一个 `vp/d` 注入器同时服务两条路）。
+     * 改一处记得改另一处。
+     */
+    private fun resolveWrappedUrl(template: String): String {
+        val path = template.replace("{client}", CLIENT).replace("{device}", CLIENT)
+        val absolute = if (path.startsWith("http")) path else LEO_BASE + path
+        val url = absolute.toHttpUrlOrNull() ?: return absolute
+        val builder = url.newBuilder()
+        commonParams().forEach { (k, v) ->
+            if (url.queryParameter(k) == null) builder.addQueryParameter(k, v)
+        }
+        // sign 输入是 path（不含 query），放最后只为日志里醒目 —— 与拦截器一致。
+        if (url.queryParameter(PARAM_SIGN) == null) {
+            SignComputer.sign(url.encodedPath)?.let { builder.addQueryParameter(PARAM_SIGN, it) }
+        }
+        return builder.build().toString()
+    }
+
+    /** 公共查询参数（逐字对齐原版真机请求；与 CommonQueryInterceptor 保持同源）。 */
+    private fun commonParams(): List<Pair<String, String>> = listOf(
+        PARAM_PRODUCT_ID to PRODUCT_ID,
+        PARAM_PLATFORM to "android${android.os.Build.VERSION.SDK_INT}",
+        PARAM_VERSION to cn.apixiaoyuan.app.BuildConfig.VERSION_NAME,
+        PARAM_VENDOR to "UC",
+        PARAM_AV to "5",
+        PARAM_DEVICE_CATEGORY to "phone",
+        PARAM_WEBVIEW_VERSION to "150",
+        PARAM_WH_RATIO to "2.17",
+        PARAM_IS_BACKGROUND to "0",
+    )
+
     /** 从 openWebView 的声明式参数里解出真实 url。 */
     private fun extractOpenUrl(payload: String?): String? = runCatching {
-        val json = JSONObject(decodePayloadJson(payload) ?: return@runCatching null)
-        val args = json.optJSONObject("params")?.optJSONArray("arguments")
-            ?: return@runCatching null
+        val args = argsOf(payload) ?: return@runCatching null
         for (i in 0 until args.length()) {
             val a = args.optJSONObject(i) ?: continue
             val schemas = a.optJSONArray("schemas")
@@ -257,9 +424,7 @@ class PkWebViewBridge(
     }.getOrNull()
 
     private fun extractToastMessage(payload: String?): String? = runCatching {
-        val json = JSONObject(decodePayloadJson(payload) ?: return@runCatching null)
-        val args = json.optJSONObject("params")?.optJSONArray("arguments")
-            ?: return@runCatching null
+        val args = argsOf(payload) ?: return@runCatching null
         for (i in 0 until args.length()) {
             if (args.optString(i).isNotBlank() && args.optJSONObject(i) == null) {
                 return@runCatching args.optString(i)
@@ -287,5 +452,30 @@ class PkWebViewBridge(
             }
         }
         return out.toByteArray()
+    }
+
+    private companion object {
+        /** 回调名候选键，顺序即优先级（`callback` 先于 `trigger`）。 */
+        val CALLBACK_KEYS = arrayOf("callback", "trigger", "jsCallBack")
+
+        /** `{client}` / `{device}` 占位符的取值。 */
+        const val CLIENT = "android"
+
+        /** 业务主域（与 [cn.apixiaoyuan.app.core.network.NetworkConfig] 同值）。 */
+        const val LEO_BASE = "https://xyks.yuanfudao.com"
+
+        const val PARAM_SIGN = "sign"
+        const val PARAM_PRODUCT_ID = "_productId"
+        const val PARAM_PLATFORM = "platform"
+        const val PARAM_VERSION = "version"
+        const val PARAM_VENDOR = "vendor"
+        const val PARAM_AV = "av"
+        const val PARAM_DEVICE_CATEGORY = "deviceCategory"
+        const val PARAM_WEBVIEW_VERSION = "webviewVersion"
+        const val PARAM_WH_RATIO = "whRatio"
+        const val PARAM_IS_BACKGROUND = "isBackground"
+
+        /** 小猿口算产品号。真机抓包逐字：`hostProductId("611")`。 */
+        const val PRODUCT_ID = "611"
     }
 }

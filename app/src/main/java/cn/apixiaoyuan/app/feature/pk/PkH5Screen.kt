@@ -1,6 +1,7 @@
 package cn.apixiaoyuan.app.feature.pk
 
 import android.annotation.SuppressLint
+import cn.apixiaoyuan.app.BuildConfig
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.CookieManager
@@ -113,21 +114,29 @@ fun PkH5Screen(
                 domStorageEnabled = true
                 loadsImagesAutomatically = true
                 mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                // UA 追加小猿口算客户端标识（2026-09-26 修复）：
-                // PK H5 从 UA 正则解析 `YuanSouTiKouSuan/(\d+\.\d+\.\d+)` 取 version，
-                // 拿不到 version 的接口全部 400；UA 还决定桥层「App 内」分支。
-                // 追加而非整体替换 —— 保留系统 WebView 标识（部分 CSS/JS 特性探测用）。
-                userAgentString = "$userAgentString YuanSouTiKouSuan/3.141.1"
+                // UA 追加小猿口算客户端标识：
+                // PK H5 的请求层按 UA 里的版本决定**是否走 requestConfig 桥**：
+                //   `isAndroid() && version >= 3.42.0 && url 含 {client}/{device}`
+                //     → 交给原生解析 URL（带 sign）
+                //     → 否则自己把 {client} 替换成 "api" 发出去（必然 417）
+                // 所以这个版本号是「H5 能否正确拿到登录态数据」的开关，别删。
+                userAgentString = "$userAgentString YuanSouTiKouSuan/${BuildConfig.VERSION_NAME}"
             }
 
-            // 原生桥（2026-09-26 修复「首屏无名字头像」「点击 PK 无反应」）：
-            //  - getUserInfo → H5 首屏用户卡的名字头像主要来源；
-            //  - openWebView → 「开始PK」点击的真正通路（native:// 声明式）；
-            //  - dataEncrypt/dataDecrypt → H5 内部出题/提交的编解码；
-            // 同一实例注册两个名字：H5 桥层无前缀能力找 window.WebView、
-            // LeoSecure 前缀能力找 window.LeoSecureWebView。
+            // 原生桥。H5 按**方法前缀**选对象名，前缀与方法名分开：
+            //  无前缀        → window.WebView.<method>
+            //  common_xxx   → window.CommonWebView.<method>
+            //  leo_xxx      → window.LeoWebView.<method>
+            //  LeoSecure_xx → window.LeoSecureWebView.<method>
+            // 找不到对象时统一回退到 window.LeoWebView.callNative(b64)。
+            //
+            // ⚠️ 四个名字必须都注册：`common_getUserInfo`（首屏用户态的唯一来源）
+            // 只会在 `CommonWebView` 或 `LeoWebView.callNative` 上落地，
+            // 少注册 = H5 永远拿不到登录态（真机症状：首屏「一年级 / 0 胜 / 胜率 0%」）。
             val bridge = PkWebViewBridge(context.applicationContext, this)
             addJavascriptInterface(bridge, "WebView")
+            addJavascriptInterface(bridge, "CommonWebView")
+            addJavascriptInterface(bridge, "LeoWebView")
             addJavascriptInterface(bridge, "LeoSecureWebView")
 
             // 同步登录态：把 SessionStore 的 cookie 写进 CookieManager。
