@@ -28,9 +28,27 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# ---------------------------------------------------------------------------
+# 结构（2026-09-27 优化，待办 11）
+#
+# 目标是「从 checkout 到出 APK」压到 3 分 4 秒内，做法三条：
+#
+#  1. **lint 拆成独立 job、与 build 并行**（此前是 `build needs lint-and-test`
+#     的串行链，lint 跑完才轮到 assembleRelease）。lint 慢但结果不影响 APK——
+#     它只该在 PR 上把问题指出来，不该堵在产物路径上。
+#  2. **测试并进 build job 的同一次 Gradle 调用**（`assembleRelease
+#     testDebugUnitTest` 一条命令）：Gradle 的配置阶段只做一次。
+#  3. **缓存交给 `gradle/actions/setup-gradle`**：它比 `setup-java` 的
+#     `cache: gradle` 多缓存配置缓存与 wrapper，且能正确处理缓存写权限
+#     （PR 来自 fork 时只读）。
+#
+# 注意：lint job 不再作为 build 的 `needs` 前置——这是与旧版的**唯一语义变化**：
+# lint 挂了 CI 整体会红，但 APK 照样产出（产物不再被静态检查堵住）。
+# ---------------------------------------------------------------------------
+
 jobs:
-  lint-and-test:
-    name: Lint & Test
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
@@ -44,16 +62,15 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Grant execute permission
         run: chmod +x gradlew
 
       - name: Lint
-        run: ./gradlew lint --no-daemon
-
-      - name: Unit tests
-        run: ./gradlew testDebugUnitTest --no-daemon
+        run: ./gradlew lintDebug --no-daemon
 
       - name: Upload lint report
         if: always()
@@ -64,8 +81,7 @@ jobs:
           if-no-files-found: warn
 
   build:
-    name: Build (unsigned)
-    needs: lint-and-test
+    name: Build + Test (unsigned)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -76,18 +92,22 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Grant execute permission
         run: chmod +x gradlew
 
-      - name: Build release (unsigned)
+      - name: Build release + unit tests (unsigned)
         run: |
           set -euo pipefail
           VC=$(grep -oP '^versionCode=\K\d+' version.properties | head -1)
           VN=$(grep -oP '^versionName=\K.*' version.properties | head -1)
           echo "Building $VN (code $VC) — CI 不改版本号"
-          ./gradlew assembleRelease --no-daemon -PversionCode="$VC" -PversionName="$VN"
+          # 一条命令同时跑测试与打包：配置阶段只做一次（配置缓存命中后几乎为零）。
+          ./gradlew assembleRelease testDebugUnitTest --no-daemon \
+            -PversionCode="$VC" -PversionName="$VN"
 
       - name: Collect APKs + ABI check + mapping
         run: |

@@ -79,7 +79,13 @@ fun ScorePumpScreen(
                         text = when {
                             viewModel.loadingScore -> "读取中…"
                             cur != null -> "$cur"
-                            else -> "—"
+                            // 读取失败时**显示 0**，不再显示破折号（待办 14）。
+                            //
+                            // 用户对照「老挂戏老叟」提出的：那边读不到就是 0，
+                            // 破折号让人分不清「没有分数」和「没读到」。
+                            // 0 是安全默认值（周练经验本来就可能为 0），
+                            // 失败原因另有 [viewModel.scoreError] 一行说明，不会误导。
+                            else -> "0"
                         },
                         color = MiuixTheme.colorScheme.onSurfaceContainer,
                         modifier = Modifier.weight(1f),

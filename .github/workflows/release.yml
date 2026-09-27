@@ -39,7 +39,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Grant execute permission
         run: chmod +x gradlew
@@ -53,13 +55,14 @@ jobs:
           echo "name=$VN" >> "$GITHUB_OUTPUT"
           echo "Version: $VN (code $VC)"
 
-      - name: Build release (unsigned)
-        run: |
-          set -euo pipefail
-          ./gradlew assembleRelease --no-daemon \
-            -PversionCode="${{ steps.version.outputs.code }}" \
-            -PversionName="${{ steps.version.outputs.name }}"
-
+      # 签名准备必须在构建**之前**（2026-09-27 修正，待办 11）。
+      #
+      # 此前顺序是「先 build unsigned，再 setup signing，再 build signed」——
+      # 同一份产物被 Gradle 跑了两遍。有 secrets 时第二遍其实会因 up-to-date
+      # 而几乎瞬间返回，但没 secrets 时（当前仓库状态）第一遍仍是纯浪费；
+      # 而且「键库在构建后才落盘」在语义上也不对——signingConfig 是在
+      # 配置阶段就读 `../keystore.jks` 是否存在的。
+      # 改成：先落 keystore，再一次性构建（有 secrets 就签，没有就 unsigned）。
       - name: Setup signing (from secrets)
         id: signing
         env:
@@ -74,8 +77,7 @@ jobs:
             echo "未配置 KEYSTORE_BASE64，降级为 unsigned APK"
           fi
 
-      - name: Build release (signed)
-        if: steps.signing.outputs.signed == 'true'
+      - name: Build release
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -85,6 +87,11 @@ jobs:
           ./gradlew assembleRelease --no-daemon \
             -PversionCode="${{ steps.version.outputs.code }}" \
             -PversionName="${{ steps.version.outputs.name }}"
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            echo "已用 keystore.jks 签名（signingConfig=release）"
+          else
+            echo "未配置签名，产出 unsigned APK"
+          fi
 
       - name: Collect APKs + ABI check + mapping
         run: |
