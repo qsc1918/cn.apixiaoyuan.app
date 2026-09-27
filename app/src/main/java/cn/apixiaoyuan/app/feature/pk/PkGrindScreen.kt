@@ -40,11 +40,15 @@ fun PkGrindScreen(
     var roundIntervalText by remember { mutableStateOf("0") }
     var selectedPointId by remember { mutableStateOf(0) }
     var strokeMode by remember { mutableStateOf(PkStrokeMode.ARC) }
+    // 频控退避基数（毫秒）。默认 60s —— 提交接口频控窗口约十分钟量级，
+    // 短于此的重试没有意义（待办 16 实证）。
+    var rateLimitWaitText by remember { mutableStateOf("60000") }
 
     val rounds = roundsText.toIntOrNull() ?: 0
     val costTimeMs = costTimeText.toLongOrNull()
     val submitDelayMs = submitDelayText.toLongOrNull() ?: 0L
     val roundIntervalMs = roundIntervalText.toLongOrNull() ?: 0L
+    val rateLimitWaitMs = rateLimitWaitText.toLongOrNull() ?: 60_000L
 
     AppScrollScaffold(title = "刷 PK 对局", onBack = { navController.popBackStack() }) {
         Column(
@@ -166,6 +170,12 @@ fun PkGrindScreen(
                     placeholder = "每局之间，如 0",
                     onValueChange = { roundIntervalText = it.filter(Char::isDigit) },
                 )
+                NumberField(
+                    title = "频控退避（毫秒，默认 60000）",
+                    value = rateLimitWaitText,
+                    placeholder = "命中 403/429 后等待多久再试",
+                    onValueChange = { rateLimitWaitText = it.filter(Char::isDigit) },
+                )
                 Text(
                     text = "画笔算法",
                     color = MiuixTheme.colorScheme.onSurfaceContainer,
@@ -199,6 +209,7 @@ fun PkGrindScreen(
                                 costTimeMs = costTimeMs,
                                 submitDelayMs = submitDelayMs,
                                 roundIntervalMs = roundIntervalMs,
+                                rateLimitWaitMs = rateLimitWaitMs,
                                 strokeMode = strokeMode,
                             )
                         }

@@ -113,6 +113,7 @@ class PkGrindViewModel : ViewModel() {
         costTimeMs: Long?,
         submitDelayMs: Long,
         roundIntervalMs: Long,
+        rateLimitWaitMs: Long = 60_000L,
         strokeMode: PkStrokeMode,
     ) {
         if (running) return
@@ -138,6 +139,7 @@ class PkGrindViewModel : ViewModel() {
                     costTimeMs = costTimeMs,
                     submitDelayMs = submitDelayMs,
                     roundIntervalMs = roundIntervalMs,
+                    rateLimitBaseMs = rateLimitWaitMs,
                     strokeMode = strokeMode,
                     onProgress = { _, done, total, ev ->
                         progress = "[数学] $ev（$done/$total）"

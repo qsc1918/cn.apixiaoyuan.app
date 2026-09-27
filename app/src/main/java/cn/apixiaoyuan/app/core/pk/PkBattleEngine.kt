@@ -62,6 +62,7 @@ object PkBattleEngine {
      * @param pointId          知识点 ID（PK 首页 pointList 提供，默认 1）
      * @param maxRetry         每轮出题/提交失败的重试上限（≥1）
      * @param retryBaseMs      重试基础退避毫秒（每次失败按 2^n 倍退避，加随机抖动）
+     * @param rateLimitBaseMs  命中频控时的退避基数（默认 [RATE_LIMIT_BASE_MS]）
      * @param roundIntervalMs  每轮之间的固定间隔（毫秒）
      * @param costTimeMs       每局提交的整卷耗时；null = 由题数 × 下限推导
      * @param onProgress       (玩法, 已完成轮数, 总轮数, 事件文本) —— UI 显示进度
@@ -73,6 +74,7 @@ object PkBattleEngine {
         pointId: Int,
         maxRetry: Int = DEFAULT_MAX_RETRY,
         retryBaseMs: Long = DEFAULT_RETRY_BASE_MS,
+        rateLimitBaseMs: Long = RATE_LIMIT_BASE_MS,
         roundIntervalMs: Long = DEFAULT_ROUND_INTERVAL_MS,
         costTimeMs: Long? = null,
         submitDelayMs: Long = 0L,
@@ -91,6 +93,7 @@ object PkBattleEngine {
                         pointId = pointId,
                         maxRetry = maxRetry,
                         retryBaseMs = retryBaseMs,
+                        rateLimitBaseMs = rateLimitBaseMs,
                         costTimeMs = costTimeMs,
                         submitDelayMs = submitDelayMs,
                         strokeMode = strokeMode,
@@ -133,6 +136,7 @@ object PkBattleEngine {
         pointId: Int,
         maxRetry: Int,
         retryBaseMs: Long,
+        rateLimitBaseMs: Long,
         costTimeMs: Long?,
         submitDelayMs: Long,
         strokeMode: PkStrokeMode,
@@ -169,7 +173,7 @@ object PkBattleEngine {
                     return false
                 }
                 rateLimitWaits++
-                val wait = RATE_LIMIT_BASE_MS * (1L shl (rateLimitWaits - 1))
+                val wait = rateLimitBaseMs * (1L shl (rateLimitWaits - 1))
                 onEvent(
                     "命中频控（HTTP ${rl.code}），等待 ${wait / 1000}s 后重试" +
                         "（第 $rateLimitWaits/$RATE_LIMIT_MAX_WAIT 次）"
