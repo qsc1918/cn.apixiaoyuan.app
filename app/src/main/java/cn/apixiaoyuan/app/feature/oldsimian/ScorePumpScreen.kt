@@ -104,8 +104,9 @@ fun ScorePumpScreen(
                     onValueChange = { delta = it.filter(Char::isDigit) },
                 )
                 Text(
-                    text = "单条增量上限 ${ScorePump.PER_ITEM_MAX}，超出自动拆条分批上报" +
-                        "（单次最多 ${ScorePump.MAX_ITEMS_PER_BATCH} 条）。",
+                    text = "一次上报**一条**记录（`obtainExp = 增量`），由服务端决定入账值：" +
+                        "单条约 ${ScorePump.PER_ITEM_MAX} 为服务端上限，超出部分不记账。" +
+                        "（旧版「拆成多条」实为伪造多次练习，已废弃。）",
                     color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                 )
             }

@@ -136,13 +136,20 @@ class ScorePumpViewModel : ViewModel() {
                 val result = ScorePump.pumpDelta(
                     delta = delta,
                     onProgress = { reported, total ->
-                        progress = "已上报 $reported / $total"
+                        progress = "服务端已入账 $reported / 请求 $total"
                     },
                 )
                 running = false
                 progress = ""
-                result.onSuccess { reported ->
-                    message = "成功：本次 +$reported（点「刷新」读最新分数）"
+                result.onSuccess { applied ->
+                    message = when {
+                        applied <= 0 ->
+                            "已上报，但服务端入账 0 —— 单条 obtainExp 有上限（约 " +
+                                "${ScorePump.PER_ITEM_MAX}）或被风控。改用「多规则类型」可各自记账。"
+                        applied < delta ->
+                            "部分成功：请求 +$delta，实际入账 +$applied（超出上限被 clamp）"
+                        else -> "成功：本次 +$applied"
+                    }
                     refreshScore()
                 }.onFailure { t ->
                     message = "失败：${t.message ?: t}"

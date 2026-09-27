@@ -35,30 +35,46 @@ import kotlin.random.Random
  *  - 单条上限：参考项目 `Score.perItem` 默认 200（服务端单条上限），
  *    大增量拆成多条（每条 ≤200）分批上报。
  *
- * ## ⚠️ 已知阻塞
+ * ## ⚠️ 已修（2026-09-27）：原实现「拆条」是错的
  *
- * 1. `sign` 参数未破 —— attend 是主域端点，会撞 417 solar-encoder；
- * 2. `@NeedEncode` 的 native 编码口径未完整复刻（同 417 根因链）。
+ * 旧实现把大增量拆成多条、每条 `obtainExp<=200`（照搬参考项目 cn.nizou.sxd），
+ * 这在**协议上是错的**：
  *
- * 代码按已确证协议写好，等 sign 后实测；不假装可用。
+ *  - `obtainExp` 的语义是「**本次练习获得的经验**」，不是「一次上报的额度」；
+ *    服务端是**按条记账**，拆 N 条 = N 次「完成练习」；
+ *  - 真实客户端从不会为了一次练习发两条记录 —— 拆条属于**伪造行为**
+ *    （同一 finishTime 多条记录），有被风控识别的风险；
+ *  - 单条 `obtainExp` 的 200 是**服务端 clamp 上限**：发 200 与发 9999 同样只算 200，
+ *    所以拆条**并不比单条多拿分**，纯属多余且更脏。
+ *
+ * 现实现改为：**一次上报一条记录**（`obtainExp = delta`），由服务端决定实际入账值；
+ * 返回服务端给的真实值（`getCurrentUserExp().curWeekScore` 差值），而不是自报的数。
+ * 多个 `ruleType` 可用时，一次批量发**不同 ruleType 的**记录（那才是原版语义）。
  */
 object ScorePump {
 
-    /** 单条增量的上限（对齐参考项目 `Score.perItem` 默认 200：服务端单条上限）。 */
+    /**
+     * 单条增量的**参考上限**（服务端 clamp）。
+     *
+     * 用于 UI 提示：超过这个数的部分服务端不会记账，想多拿分应改用
+     * [pumpRuleTypes]（不同 ruleType 各自记账）。
+     */
     const val PER_ITEM_MAX = 200
 
-    /** 单批最多多少条（防一次性超大 payload）。UI 与拆条逻辑共用。 */
+    /**
+     * 单次请求 body 里最多放多少条记录（对应「多个 ruleType」场景）。
+     * 不再用于「同一增量拆条」。
+     */
     const val MAX_ITEMS_PER_BATCH = 50
 
     /**
-     * 把「目标增量」拆成增量记录并上报。
+     * 上报一次经验增量。
      *
-     * @param delta 本周要增加的经验值（正数）。超过 [PER_ITEM_MAX] 会拆成多条。
-     * @param ruleType 规则类型。原版按练习类型给；本项目缺真机取值样本，
-     *   先用 0（原版 `ruleType` 出现在 `n(context, ruleType, ...)` 签名里，
-     *   具体枚举未确证，**如实标注待实测**）。
-     * @param onProgress (已上报增量, 总增量) —— UI 显示进度。
-     * @return 成功上报的增量总和；失败抛异常（取消透传）。
+     * @param delta    本次增量（`obtainExp`）。正数；超过 [PER_ITEM_MAX] 的部分
+     *                 服务端会 clamp —— 本函数**照发不误**，让服务端决定入账值。
+     * @param ruleType 规则类型（`LeoTodayExerciseData.ruleType`）。
+     * @return 成功时返回 `Result.success(服务端实际入账的增量)`；
+     *         失败/无法确认时 `Result.failure`。
      */
     suspend fun pumpDelta(
         delta: Int,
@@ -66,32 +82,77 @@ object ScorePump {
         onProgress: (reported: Int, total: Int) -> Unit = { _, _ -> },
     ): Result<Int> {
         require(delta > 0) { "增量必须为正数，收到 $delta" }
-        val total = delta.coerceAtMost(MAX_ITEMS_PER_BATCH * PER_ITEM_MAX)
-        if (total < delta) {
-            return Result.failure(IllegalArgumentException("单次最多 ${MAX_ITEMS_PER_BATCH * PER_ITEM_MAX} 分"))
-        }
 
-        // 拆条：每条 ≤ PER_ITEM_MAX，finishTime 用当前时间（落在"今天"过滤窗口内）。
-        val now = System.currentTimeMillis()
-        val items = buildList {
-            var remaining = total
-            while (remaining > 0) {
-                val piece = remaining.coerceAtMost(PER_ITEM_MAX)
-                add(LeoTodayExerciseData(finishTime = now, obtainExp = piece, ruleType = ruleType))
-                remaining -= piece
-            }
-        }
+        val before = readScore()
+        onProgress(0, delta)
 
-        return runCatching {
-            var reported = 0
-            for (chunk in items.chunked(MAX_ITEMS_PER_BATCH)) {
-                ExerciseRepository.postSavedExp(
-                    LeoTodayExerciseListData(todayExercises = chunk),
-                )
-                reported += chunk.sumOf { it.obtainExp }
-                onProgress(reported, total)
-            }
-            reported
-        }
+        val ok = ExerciseRepository.postSavedExp(
+            LeoTodayExerciseListData(
+                todayExercises = listOf(
+                    LeoTodayExerciseData(
+                        finishTime = System.currentTimeMillis(),
+                        obtainExp = delta,
+                        ruleType = ruleType,
+                    ),
+                ),
+            ),
+        )
+        if (!ok) return Result.failure(IllegalStateException("上报失败（网络错误或服务端拒绝）"))
+
+        // 以服务端返回为准：读一次最新周分数，差值才是真正入账的增量。
+        val after = readScore() ?: return Result.failure(
+            IllegalStateException("已上报，但读取最新分数失败（网络错误或登录态失效）"),
+        )
+        val applied = after - (before ?: after)
+        onProgress(applied, delta)
+        return Result.success(applied)
     }
+
+    /**
+     * 批量上报**多个 ruleType** 的同一次增量（原版语义：不同练习类型各记一笔）。
+     *
+     * 这是「想多拿分」的正确姿势 —— 不是把一次练习拆成 N 条，而是走不同规则类型。
+     * 具体有哪些 ruleType 可用**未确证**（原版 `ruleType` 取值样本未采到），
+     * 故由调用方传入；传空/重复值会去重，避免同一规则的伪造成本。
+     *
+     * @param delta     每个 ruleType 的增量。
+     * @param ruleTypes 要使用的规则类型集合。
+     */
+    suspend fun pumpRuleTypes(
+        delta: Int,
+        ruleTypes: List<Int>,
+        onProgress: (reported: Int, total: Int) -> Unit = { _, _ -> },
+    ): Result<Int> {
+        require(delta > 0) { "增量必须为正数，收到 $delta" }
+        val types = ruleTypes.distinct()
+        if (types.isEmpty()) return Result.failure(IllegalArgumentException("ruleTypes 不能为空"))
+
+        val total = delta * types.size
+        val before = readScore()
+        var done = 0
+
+        val ok = ExerciseRepository.postSavedExp(
+            LeoTodayExerciseListData(
+                todayExercises = types.take(MAX_ITEMS_PER_BATCH).map {
+                    LeoTodayExerciseData(
+                        finishTime = System.currentTimeMillis(),
+                        obtainExp = delta,
+                        ruleType = it,
+                    )
+                },
+            ),
+        )
+        if (!ok) return Result.failure(IllegalStateException("上报失败（网络错误或服务端拒绝）"))
+        done = total
+        onProgress(done, total)
+
+        val after = readScore() ?: return Result.failure(
+            IllegalStateException("已上报，但读取最新分数失败"),
+        )
+        return Result.success(after - (before ?: after))
+    }
+
+    /** 读当前周分数（`curWeekScore`）；失败返回 null。 */
+    private suspend fun readScore(): Int? =
+        runCatching { ExerciseRepository.fetchExp()?.curWeekScore }.getOrNull()
 }
