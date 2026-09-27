@@ -2,6 +2,7 @@ package cn.apixiaoyuan.app.core.native
 
 import android.content.Context
 import android.util.Log
+import cn.apixiaoyuan.app.core.log.AppLogger
 import com.fenbi.android.leo.imgsearch.sdk.utils.e
 import java.io.File
 
@@ -54,19 +55,38 @@ import java.io.File
  *
  * ## 注意
  *
- * `System.load` 只能加载一次（重复加载同一路径会抛
- * `UnsatisfiedLinkError: dlopen failed: library ... already opened`），
+ * 库只能加载一次（重复加载会抛 `UnsatisfiedLinkError: ... already opened`），
  * 故 [init] 用 `ready` 做幂等，且整段包在 `runCatching` 里 ——
  * **编码器不可用只应退化为「不编码」，绝不能拖垮 App 启动**。
+ *
+ * 加载走 [System.loadLibrary]（by-name，so 位于 APK 内由 classloader namespace 直接加载）；
+ * 不要改成「解压到 filesDir 再 System.load」—— 会被 W^X 策略以
+ * `Attempt to load writable file` 拒绝（详见 [LIB_NAME] 的 KDoc）。
  */
 object ContentBridge {
 
     private const val TAG = "ContentBridge"
 
-    private const val SO_NAME = "libContentEncoder.so"
+    /**
+     * `System.loadLibrary` 用的库名，对应内置的 `jniLibs/arm64-v8a/libContentEncoder.so`。
+     *
+     * ## 为什么不是 `System.load(解压到 filesDir 的副本)`（2026-09-27 教训）
+     *
+     * 本工程 `extractNativeLibs=false`，so 位于 APK 的 `lib/arm64-v8a/` 内，
+     * 由 classloader namespace 直接从 `base.apk!/lib/...` 加载 —— 这没问题。
+     *
+     * 但**若自己把 so 解压到 `filesDir/native/` 再 `System.load`**，会失败：
+     * ```
+     * java.lang.UnsatisfiedLinkError: Attempt to load writable file:
+     *   /data/user/0/cn.apixiaoyuan.app/files/native/libContentEncoder.so
+     * ```
+     * Android 的 W^X 策略拒绝加载**可写目录**里的 so（防运行时改代码绕过校验）。
+     * 实测同一文件用 native `dlopen` 可以（sign 侧即如此），`System.load` 不行。
+     * 故此处直接走 by-name 加载，不再自行解压。
+     */
+    private const val LIB_NAME = "ContentEncoder"
 
-    /** 设备上该 so 的字节数，用于校验取到的是正确版本。 */
-    private const val SO_SIZE = 298_144L
+    private const val SO_NAME = "libContentEncoder.so"
 
     @Volatile
     private var ready = false
@@ -81,19 +101,25 @@ object ContentBridge {
      */
     fun init(context: Context): Boolean {
         if (ready) return true
-        val so = NativeSoExtractor.resolve(context, SO_NAME, SO_SIZE) ?: run {
-            Log.w(TAG, "$SO_NAME unavailable")
-            return false
-        }
         val ok = runCatching {
-            System.load(so.absolutePath)
+            System.loadLibrary(LIB_NAME)
             true
-        }.getOrElse { t ->
-            Log.w(TAG, "System.load(${so.absolutePath}) failed: $t")
-            false
+        }.getOrElse { byNameErr ->
+            // 兜底：ABI split / 预解压等形态下 by-name 可能找不到，
+            // 退回 nativeLibraryDir 里的只读副本（该目录不可写，System.load 允许）。
+            val so = File(context.applicationInfo.nativeLibraryDir, SO_NAME)
+            val done = if (so.exists()) {
+                runCatching { System.load(so.absolutePath); true }
+                    .getOrElse { t -> Log.w(TAG, "System.load(${so.absolutePath}) failed: $t"); false }
+            } else {
+                Log.w(TAG, "loadLibrary($LIB_NAME) failed: $byNameErr")
+                false
+            }
+            done
         }
         ready = ok
-        Log.i(TAG, "init ok=$ok (so=${so.absolutePath})")
+        Log.i(TAG, "init ok=$ok")
+        AppLogger.d(TAG, "init ok=$ok（编码器${if (ok) "生效" else "不可用，提交将退回明文"}）")
         return ok
     }
 
