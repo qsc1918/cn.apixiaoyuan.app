@@ -100,6 +100,12 @@ class NeedEncodeInterceptor : okhttp3.Interceptor {
         val body = request.body ?: return chain.proceed(request)
         val raw = okio.Buffer().also { body.writeTo(it) }.readByteArray()
         val encoded = EncodeBridge.encode(raw)
+        // 编码诊断：raw==encoded 说明 native 编码器未生效（服务端会因收到明文却
+        // 声明 octet-stream 而拒）。日志页可据此定位提交 400 "error"。
+        cn.apixiaoyuan.app.core.log.AppLogger.d(
+            "NeedEncode",
+            "${request.method} ${request.url.encodedPath} raw=${raw.size}B encoded=${encoded.size}B native=${EncodeBridge.nativeAvailable}",
+        )
 
         // 与 `wp/h.b` 一致：编码后的 body 一律声明为 octet-stream。
         // 二进制编码结果本来就不是 JSON，用 JSON 的 Content-Type 描述它是错的。
