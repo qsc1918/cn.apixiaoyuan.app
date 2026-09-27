@@ -35,6 +35,26 @@ object PkBattleEngine {
     const val DEFAULT_ROUND_INTERVAL_MS = 0L
 
     /**
+     * 命中**频控**时的退避基数（毫秒）。
+     *
+     * ## 为什么频控要单独一套退避（2026-09-27，待办 16）
+     *
+     * 真机实测：提交接口（`PUT .../math/pk/submit`）的频控**独立于出题接口**，
+     * 窗口约 10 分钟级。旧实现把 403 当普通失败，按 `retryBaseMs << n`
+     * （默认 800ms → 1.6s → 3.2s）重试 —— 三个回合全在窗口内，
+     * 等于**白打三次**，还会把窗口推得更长（真机日志里那一串
+     * `match → 400 请求过于频繁` 就是这么来的）。
+     *
+     * 所以频控改用大得多的基数并**限次**：默认最多等 2 次、每次
+     * 60s / 120s。等不到的就不必继续烧请求了 —— 那属于「服务端让你停」，
+     * 不是「客户端要重试」。
+     */
+    const val RATE_LIMIT_BASE_MS = 60_000L
+
+    /** 频控最多退避重试次数。 */
+    const val RATE_LIMIT_MAX_WAIT = 2
+
+    /**
      * 跑一轮 PK 战斗（多玩法并发，各自循环）。
      *
      * @param rounds           每个玩法要刷的轮数（≥1）
@@ -96,6 +116,16 @@ object PkBattleEngine {
     /**
      * 跑一局：出题 → 组装全对 body → 提交，带失败重试。
      *
+     * ## 两类失败，两套策略（2026-09-27，待办 16）
+     *
+     *  - **频控**（[PkHttpException.isRateLimited]）：退避 [RATE_LIMIT_BASE_MS] × 2^n，
+     *    最多 [RATE_LIMIT_MAX_WAIT] 次。频控是「服务端让你停」，密集重试只会
+     *    延长窗口（真机已实测到这个后果），所以等的时间必须比普通重试大两个数量级。
+     *  - **其他失败**：原有指数退避（`retryBaseMs << n` + 抖动），最多 [maxRetry] 次。
+     *
+     * 计数分开：频控等待不计入 [maxRetry]，否则「1 次 403 + 2 次普通重试」
+     * 会在窗口还没过时就宣告整局失败。
+     *
      * @return true = 本局成功（出题+提交都成功）；false = 重试耗尽仍失败。
      */
     private suspend fun runOneRound(
@@ -109,6 +139,7 @@ object PkBattleEngine {
         onEvent: (String) -> Unit,
     ): Boolean {
         var attempt = 0
+        var rateLimitWaits = 0
         while (true) {
             try {
                 onEvent("出题中…")
@@ -125,6 +156,25 @@ object PkBattleEngine {
                 return true
             } catch (c: CancellationException) {
                 throw c
+            } catch (rl: PkHttpException) {
+                if (!rl.isRateLimited) {
+                    onEvent("提交被拒（HTTP ${rl.code}）：${rl.body.take(120)}")
+                    return false
+                }
+                if (rateLimitWaits >= RATE_LIMIT_MAX_WAIT) {
+                    onEvent(
+                        "频控未解除（HTTP ${rl.code}，已等待 $rateLimitWaits 次）—— " +
+                            "停止本局。该接口频控窗口约十分钟量级，请稍后再试。"
+                    )
+                    return false
+                }
+                rateLimitWaits++
+                val wait = RATE_LIMIT_BASE_MS * (1L shl (rateLimitWaits - 1))
+                onEvent(
+                    "命中频控（HTTP ${rl.code}），等待 ${wait / 1000}s 后重试" +
+                        "（第 $rateLimitWaits/$RATE_LIMIT_MAX_WAIT 次）"
+                )
+                delay(wait)
             } catch (t: Throwable) {
                 attempt++
                 if (attempt >= maxRetry) {

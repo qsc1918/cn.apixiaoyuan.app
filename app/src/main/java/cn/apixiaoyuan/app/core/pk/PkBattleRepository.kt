@@ -51,11 +51,15 @@ object PkBattleRepository {
      */
     suspend fun fetchMatch(mode: PkMode, pointId: Int): PkMatchResponse {
         val api = ServiceLocator.pkBattle
-        val body = when (mode) {
-            PkMode.MATH -> api.mathMatch(pointId = pointId)
-            PkMode.MULTI -> api.multiMatch(pointId = pointId)
-            PkMode.FINAL -> api.finalMatch(pointId = pointId)
-            PkMode.ENGLISH -> api.englishMatch(pointId = pointId)
+        val body = try {
+            when (mode) {
+                PkMode.MATH -> api.mathMatch(pointId = pointId)
+                PkMode.MULTI -> api.multiMatch(pointId = pointId)
+                PkMode.FINAL -> api.finalMatch(pointId = pointId)
+                PkMode.ENGLISH -> api.englishMatch(pointId = pointId)
+            }
+        } catch (e: retrofit2.HttpException) {
+            throw toPkException(e)
         }
         val raw = body.string()
         return json.decodeFromString<PkMatchResponse>(raw)
@@ -66,17 +70,46 @@ object PkBattleRepository {
      *
      * body 由 [buildSubmitBody] 组装好，`@NeedEncode` 自动编码成 octet-stream。
      *
-     * @return 提交响应原始文本；失败抛异常。
+     * ## 错误必须带响应体（2026-09-27，待办 16）
+     *
+     * 403 的 body 是 `{"status":403,"message":"error"}`、400 的 body 可能是
+     * `请求过于频繁` —— 判决信息只在 body 里。Retrofit 默认把它丢掉，
+     * 这里捕获后转成 [PkHttpException] 保留下来（并落日志），
+     * 上层的重试策略才能据此区分「等一等」与「别等了」。
+     *
+     * @return 提交响应原始文本；失败抛 [PkHttpException]（HTTP 非 2xx）或其他异常。
      */
     suspend fun submit(mode: PkMode, body: PkSubmitBody): String {
         val api = ServiceLocator.pkBattle
-        val resp = when (mode) {
-            PkMode.MATH -> api.submitMath(body)
-            PkMode.MULTI -> api.submitMulti(body)
-            PkMode.FINAL -> api.submitFinal(body)
-            PkMode.ENGLISH -> api.submitEnglish(body)
+        val resp = try {
+            when (mode) {
+                PkMode.MATH -> api.submitMath(body)
+                PkMode.MULTI -> api.submitMulti(body)
+                PkMode.FINAL -> api.submitFinal(body)
+                PkMode.ENGLISH -> api.submitEnglish(body)
+            }
+        } catch (e: retrofit2.HttpException) {
+            throw toPkException(e)
         }
         return resp.string()
+    }
+
+    /**
+     * 把 Retrofit 的 [retrofit2.HttpException] 换成带 body 的 [PkHttpException]，
+     * 并把「状态码 + body + 是否频控」落进日志页。
+     *
+     * `response()?.errorBody()` 只能读一次，这里读成字符串后转交；
+     * 读取本身也可能失败（连接已回收），失败时退回空串而不是再抛。
+     */
+    private fun toPkException(e: retrofit2.HttpException): PkHttpException {
+        val code = e.code()
+        val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull().orEmpty()
+        val ex = PkHttpException(code = code, body = body)
+        cn.apixiaoyuan.app.core.log.AppLogger.w(
+            "PkBattle",
+            "HTTP $code（${if (ex.isRateLimited) "频控/风控" else "内容被拒"}）body=${body.take(200)}",
+        )
+        return ex
     }
 
     /**
