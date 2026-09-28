@@ -520,6 +520,18 @@ private fun syncCookiesToWebView(pageUrl: String) {
         cm.setCookie("https://$pageHost", cookieString)
     }
     cm.flush()
+    // ★ 诊断（2026-09-28）：H5 的登录态完全取决于「这批 cookie 到底写没写进去」，
+    //   而 `setCookie` 失败是**静默**的（domain 不合法/URL 不合法都不报错）。
+    //   这里把关键角色的存在性打出来，真机一眼可判定是「没同步」还是「同步了但 H5 不认」。
+    val names = SessionStore.loadCookies().map { it.name }.toSet()
+    cn.apixiaoyuan.app.core.log.AppLogger.i(
+        "PkH5",
+        "cookie 同步 → host=$pageHost 共 ${names.size} 条；" +
+            "sid=${if ("sid" in names) "有" else "无"} " +
+            "sess=${if ("sess" in names) "有" else "无"} " +
+            "userid=${SessionStore.cookie("userid") ?: "无"} " +
+            "ks_deviceid=${SessionStore.cookie("ks_deviceid") ?: "无"}",
+    )
 }
 
 /** epoch 毫秒 → HTTP 日期（`EEE, dd MMM yyyy HH:mm:ss z`，GMT）。 */
