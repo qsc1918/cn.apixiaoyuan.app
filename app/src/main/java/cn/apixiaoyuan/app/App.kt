@@ -72,6 +72,10 @@ class App : Application() {
         // 设备链池：与 SessionStore 同为 SharedPreferences 存储，同样要先 init。
         // 放在这里（而非懒加载）是因为「导入 cookie 自动入池」在 UI 早期就可能触发。
         DeviceChainPool.init(this)
+        // 内置设备链种子：把 `assets/device_chains_seed.json` 里的链并入池。
+        // 幂等 —— `seed_imported_v1` 标记落盘后不再执行；只补池、不改当前会话，
+        // 因此不会意外改变登录态。必须在 DeviceChainPool.init 之后调用。
+        runCatching { cn.apixiaoyuan.app.core.session.DeviceChainSeed.ensureImported(this) }
 
         // 设备指纹：YFD_U 的取值来源（`Lds/i3` 链路复刻）。
         // 登录/发码接口都用它作设备级频控键，必须在任何登录动作之前就绪。

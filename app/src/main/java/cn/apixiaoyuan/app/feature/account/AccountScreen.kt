@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -27,6 +28,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.apixiaoyuan.app.core.navigation.AppNavController
 import cn.apixiaoyuan.app.core.account.SubAccountItem
 import cn.apixiaoyuan.app.core.oldsimian.OldSimianPrefs
+import cn.apixiaoyuan.app.core.session.DeviceChainPool
+import cn.apixiaoyuan.app.core.session.DeviceChainSeed
 import cn.apixiaoyuan.app.core.design.component.AppScrollScaffold
 import cn.apixiaoyuan.app.core.design.icon.AppIcons
 import top.yukonga.miuix.kmp.basic.Button
@@ -315,6 +318,81 @@ fun AccountScreen(
                         "两层必须共存。设备链也不会被服务端的清除指令抹掉。\n" +
                         "注：练习类接口在两层齐备后仍可能返回 417（solar-encoder），" +
                         "那是编码层校验，与登录态无关。",
+                    color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                )
+            }
+
+            // ==================== 设备链池 ====================
+            //
+            // 用户要求（2026-09-29）：设备链内置进 App 之后，**用户还能自己再加**。
+            // 池是「多点轮换」的载体 —— 池里多份不同来源的链，按请求随机挑一份，
+            // 把「同一条链被高频使用」的痕迹摊薄。
+            //
+            // 内置的 3 条在首次启动时已由 DeviceChainSeed 自动并入，
+            // 这里的「恢复内置」用于用户误删后找回。
+            SectionCard(title = "设备链池") {
+                var poolRevision by remember { mutableStateOf(0) }
+                val context = LocalContext.current
+                val pool = remember(poolRevision) { DeviceChainPool.listAll() }
+                Text(
+                    text = "池内 ${pool.size} 份（启用 ${pool.count { it.enabled }}）· " +
+                        "轮换时会随机挑一份启用中的链。",
+                    color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                )
+                if (pool.isEmpty()) {
+                    Text(
+                        text = "池为空。可在上方「导入登录态」粘贴含 ks_* 的 cookie，或点下方恢复内置。",
+                        color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                    )
+                } else {
+                    pool.forEach { item ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = item.label,
+                                    color = MiuixTheme.colorScheme.onSurfaceContainer,
+                                )
+                                Text(
+                                    text = "deviceId ${item.deviceId ?: "未知"} · " +
+                                        (if (item.enabled) "启用中" else "已停用") +
+                                        " · ${item.decodeCookies().size} 项 ks_*",
+                                    color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    DeviceChainPool.setEnabled(item.id, !item.enabled)
+                                    poolRevision++
+                                },
+                            ) { Text(if (item.enabled) "停用" else "启用") }
+                            Button(
+                                onClick = {
+                                    DeviceChainPool.remove(item.id)
+                                    poolRevision++
+                                },
+                            ) { Text("删除") }
+                        }
+                    }
+                }
+                Button(
+                    onClick = {
+                        DeviceChainSeed.ensureImported(context, force = true)
+                        poolRevision++
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("恢复内置设备链")
+                }
+                Text(
+                    text = "⚠️ 设备链是设备级凭据（拿到即可伪装同一台设备）：" +
+                        "内置的几条与本仓库源码一同公开，介意可停用或删除，" +
+                        "改用自己在原版 App 里抓到的链。",
                     color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                 )
             }
