@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -51,6 +52,23 @@ import kotlinx.serialization.json.Json
  * `LocalUriHandler.openUri` 的入参，两处必须一致，抽成常量避免改一处漏一处。
  */
 private const val GITHUB_URL = "https://github.com/sxd91/cn.apixiaoyuan.app"
+
+/**
+ * QQ 交流群（点击**复制群号**，不跳转 —— 见下方说明）。
+ *
+ * ## 为什么是「复制」而不是「跳转加群」
+ *
+ * 跳转加群要拼 `mqqapi://card/show_pslcard?src_type=internal&uin=<群号>` 一类
+ * 私有 scheme，依赖 QQ 客户端版本与是否安装；失败时用户只看到「没反应」。
+ * 而**复制群号**在任何环境都可用：没装 QQ 的也能复制到别处粘，
+ * 装了 QQ 的粘进「加群」框即可。所以选复制，并在提示里说明已复制。
+ *
+ * 提示文案会带上群号，用户即便没注意 Toast 也能从描述里看到。
+ */
+private val QQ_GROUPS = listOf(
+    "一群" to "994173459",
+    "二群" to "1109588491",
+)
 
 /**
  * 设置页 —— 移植「老挂戏老叟」（cn.nizou.sxd）SettingsScreen 的主题 + 配置两段。
@@ -80,6 +98,8 @@ fun SettingsScreen(navController: AppNavController) {
     // 「关于 → 项目地址」用系统浏览器打开。LocalUriHandler 在没有可处理
     // 该 scheme 的应用时会抛 IllegalStateException，调用处已 runCatching。
     val uriHandler = LocalUriHandler.current
+    // QQ 群「点击复制」要用（与日志页同一套剪贴板写法）。
+    val context = LocalContext.current
 
     // SAF：导出 —— 让用户在系统文件管理器里选保存位置。
     val exportLauncher = rememberLauncherForCreateJson { uri ->
@@ -235,9 +255,20 @@ fun SettingsScreen(navController: AppNavController) {
                     title = "版本",
                     description = "${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）",
                 )
+                // QQ 交流群：点一行复制对应群号。
+                QQ_GROUPS.forEach { (label, number) ->
+                    SettingRow(
+                        title = "QQ $label",
+                        description = "$number   （点击复制群号）",
+                        onClick = {
+                            copyToClipboard(context, number)
+                            transferHint = "已复制「$label」群号：$number"
+                        },
+                    )
+                }
                 SettingRow(
                     title = "项目地址",
-                    description = GITHUB_URL,
+                    description = "$GITHUB_URL   （点击跳转）",
                     onClick = {
                         // 设备上没有可处理 https 的应用时 openUri 会抛，
                         // 这里吞掉并给个提示，不让设置页崩。
@@ -485,5 +516,20 @@ private fun SettingRow(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
+    }
+}
+
+/**
+ * 复制文本到剪贴板。
+ *
+ * 与日志页 `LogScreen.copyToClipboard` 同一实现 —— 不抽公共工具是因为
+ * 两处只差一个 ClipData label，为 6 行代码建一个跨包工具类不划算。
+ * 复制失败（极少数机型剪贴板服务不可用）静默吞掉，不让设置页崩。
+ */
+private fun copyToClipboard(context: android.content.Context, text: String) {
+    runCatching {
+        val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+            as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("qq-group", text))
     }
 }
