@@ -20,6 +20,22 @@ object NetworkConfig {
 
     // ---- 线上（com）----
 
+    /**
+     * ★ 主域协议版本（**不是** App 的 versionName，别搞混）。
+     *
+     * 服务端（`solar-encoder`）**只放行 3.140.1**；用 App 自己的 `3.141.1`
+     * 打主域端点会被拦（实测：练习/switch/batchGet 直接 400/417）。
+     *
+     * 证据链：
+     *  - 原版真机抓包（`auto_oral-2026-09-27.log`）里所有主域请求都是 `version=3.140.1`；
+     *  - 逐项 A/B：`version=3.141.1` → 417，`version=3.140.1` → 200；
+     *  - pk-node 侧同结论（README 4.7/4.10）。
+     *
+     * ⚠️ 例外：PK 接口（`/leo-game-pk/...`）自带 `version=3.141.1&_productId=631&_appId=6`，
+     * 那是它自己的口径，本拦截器不会覆盖已存在的参数。
+     */
+    const val LEO_PROTOCOL_VERSION = "3.140.1"
+
     const val LEO_HOST_COM = "xyks.yuanfudao.com"
     const val YTK_HOST_COM = "ape-api.yuanfudao.com"
 

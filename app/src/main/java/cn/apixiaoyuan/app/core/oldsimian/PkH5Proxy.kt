@@ -250,7 +250,8 @@ internal object PkH5Proxy {
     private val COMMON_PARAMS: List<Pair<String, String>> = listOf(
         "_productId" to "611",
         "platform" to "android${android.os.Build.VERSION.SDK_INT}",
-        "version" to cn.apixiaoyuan.app.BuildConfig.VERSION_NAME,
+        // ★ 主域协议版本（3.140.1），不是 App 的 versionName —— 见 NetworkConfig。
+        "version" to cn.apixiaoyuan.app.core.network.NetworkConfig.LEO_PROTOCOL_VERSION,
         "vendor" to "UC",
         "av" to "5",
         "deviceCategory" to "phone",
@@ -261,7 +262,7 @@ internal object PkH5Proxy {
 
     /** H5 未带 UA 时的兜底（与 [HeaderInterceptor] 同形态）。 */
     private val DEFAULT_UA: String =
-        "Leo/${cn.apixiaoyuan.app.BuildConfig.VERSION_NAME} " +
+        "Leo/${cn.apixiaoyuan.app.core.network.NetworkConfig.LEO_PROTOCOL_VERSION} " +
             "(${android.os.Build.BRAND}${android.os.Build.MODEL}; Android ${android.os.Build.VERSION.SDK_INT}; Scale/1.0)"
 
     private const val POST_BODY_TYPE = "application/json; charset=utf-8"

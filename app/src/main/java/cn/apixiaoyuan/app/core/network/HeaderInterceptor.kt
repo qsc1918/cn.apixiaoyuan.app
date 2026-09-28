@@ -66,7 +66,9 @@ class HeaderInterceptor(
             android.content.res.Resources.getSystem().displayMetrics.density
         }.getOrDefault(1.0f)
         val scale = if (density % 1.0f == 0f) density.toInt().toString() else density.toString()
-        return "Leo/$appVersionName (${Build.BRAND}${Build.MODEL}; Android ${Build.VERSION.SDK_INT}; Scale/$scale)"
+        // UA 里的版本也是「主域协议版本」（真机抓包为 3.140.1），不是 App 的 versionName。
+        return "Leo/${NetworkConfig.LEO_PROTOCOL_VERSION} " +
+            "(${Build.BRAND}${Build.MODEL}; Android ${Build.VERSION.SDK_INT}; Scale/$scale)"
     }
 
     /** 20 位小写十六进制，形态同真机 `leo-client-trace-id`。 */

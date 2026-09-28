@@ -58,7 +58,7 @@ import cn.apixiaoyuan.app.core.sign.SignComputer
  *  - `_productId=611` —— 小猿口算的产品号，来自
  *    `vg/s.a()` 的 `hostProductId("611")`；
  *  - `platform=android37` —— `"android"` + `Build.VERSION.SDK_INT`；
- *  - `version` —— BuildConfig 版本名（本项目对齐原版 `3.140.1`）；
+ *  - `version` —— **主域协议版本** [NetworkConfig.LEO_PROTOCOL_VERSION]（恒 `3.140.1`，不是 App 版本）；
  *  - `vendor=UC`、`av=5`、`deviceCategory=phone`、`webviewVersion=150`、
  *    `whRatio=2.17` —— 真机固定值。
  *
@@ -101,7 +101,9 @@ class CommonQueryInterceptor(
 
         ensure(PARAM_PRODUCT_ID, PRODUCT_ID)
         ensure(PARAM_PLATFORM, "android$sdkInt")
-        ensure(PARAM_VERSION, appVersionName)
+        // ★ 用「主域协议版本」而不是 App 的 versionName：
+        //   服务端只放行 3.140.1，App 版本 3.141.1 会被 solar-encoder 拦（见 NetworkConfig）。
+        ensure(PARAM_VERSION, NetworkConfig.LEO_PROTOCOL_VERSION)
         ensure(PARAM_VENDOR, VENDOR)
         ensure(PARAM_AV, AV)
         ensure(PARAM_DEVICE_CATEGORY, DEVICE_CATEGORY)
