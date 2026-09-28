@@ -93,9 +93,19 @@ interface LeoExerciseCommonLegacyApiService {
      * POST `/leo-star/android/exercise/rank/login/attend`，Body 是
      * `LeoTodayExerciseListData`。
      *
-     * **参数带 `@NeedEncode`** —— 请求体在发出前需 native 编码。
-     * 本工程当前无此编码器，先用恒等实现挡着；接入后若服务端拒绝
-     * 未编码的 body，会在 4xx 暴露。
+     * **参数带 `@NeedEncode`** —— 请求体在发出前必须编码：
+     * `gzip 压缩 → libContentEncoder.so 的 c()`，且 `Content-Type` 改为
+     * `application/octet-stream`。编码器已实现（[cn.apixiaoyuan.app.core.native.NativeEncodeInstaller]，
+     * 在 `App.onCreate` 装入 [cn.apixiaoyuan.app.core.network.EncodeBridge]）。
+     *
+     * ## ★ pk-node 实测（2026-09-28）：编码是**硬要求**
+     * ```
+     * 明文直接发    → HTTP 500
+     * gzip + c() → 200 {data:true}
+     * ```
+     * 另有频率约束：**同一 `ruleType` 一天只记一次**（第二次发静默丢弃，不报错），
+     * 可记账的 ruleType 见 [cn.apixiaoyuan.app.core.oldsimian.ScorePump.PUMP_RULE_TYPES]（仅 0/1）
+     * ⇒ 日上限 400。
      */
     @BaseUrl(BASE_LEO)
     @GsonConverter
