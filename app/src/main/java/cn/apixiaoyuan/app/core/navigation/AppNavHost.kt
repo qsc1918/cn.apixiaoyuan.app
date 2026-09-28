@@ -95,6 +95,9 @@ fun AppNavHost(
             entry<RouteOldSimian>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                 cn.apixiaoyuan.app.feature.oldsimian.OldSimianScreen(navController)
             }
+            entry<RouteExercisePump>(swipeDismiss = NavSwipeDirection.LeftToRight) {
+                cn.apixiaoyuan.app.feature.exercise.ExercisePumpScreen(navController)
+            }
             entry<RouteGrind>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                 cn.apixiaoyuan.app.feature.grind.GrindScreen(navController)
             }

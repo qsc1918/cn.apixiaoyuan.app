@@ -13,7 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cn.apixiaoyuan.app.core.design.component.AppScrollScaffold
 import cn.apixiaoyuan.app.core.navigation.AppNavController
-import cn.apixiaoyuan.app.core.navigation.RouteExercise
+import cn.apixiaoyuan.app.core.navigation.RouteExercisePump
 import cn.apixiaoyuan.app.core.navigation.RoutePkGrind
 import cn.apixiaoyuan.app.core.navigation.RouteScorePump
 import cn.apixiaoyuan.app.core.oldsimian.OldSimianPrefs
@@ -34,7 +34,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * | 选项 | 路由 | 说明 |
  * |---|---|---|
  * | PK 刷对局 | [RoutePkGrind] | 纯 API 刷局（出题 → 弧线笔迹 → 提交 → **结算核对**）|
- * | 练习刷对局 | [RouteExercise] | 练习闭环（知识点 → 出题 → 提交笔迹 → 经验上报）|
+ * | 练习刷对局 | [RouteExercisePump] | 与网页端同做法：循环出题→抄答案+笔迹→提交，按冷却配速 |
  * | 直接刷分 | [RouteScorePump] | 直接报经验增量（日上限 400，见 ScorePump）|
  *
  * ## 为什么用「卡 + 行」而不是并排三宫格
@@ -71,8 +71,9 @@ fun GrindScreen(navController: AppNavController) {
                 )
                 EntryRow(
                     title = "练习刷对局",
-                    summary = "知识点 → 出题 → 提交（带笔迹）→ 经验上报；每题自带答案",
-                    onClick = { navController.navigate(RouteExercise) },
+                    summary = "与网页端同做法：选知识点 → 循环「出题 → 抄答案+笔迹 → 提交」，" +
+                        "按出题冷却（≈62s/账号）配速",
+                    onClick = { navController.navigate(RouteExercisePump) },
                 )
                 EntryRow(
                     title = "直接刷分",

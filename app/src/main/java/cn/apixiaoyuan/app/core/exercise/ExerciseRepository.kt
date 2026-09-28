@@ -189,6 +189,68 @@ object ExerciseRepository {
     }.getOrNull()
 
     /**
+     * 出题（带 **429 频控重试**）—— 刷对局专用。
+     *
+     * ## ★ 为什么需要它（2026-09-28，对齐 pk-node 的 `runPractice`）
+     *
+     * 服务端对出题有**账号级冷却**（实测 ≈62s）。刷对局是按轮循环的，
+     * 一旦配速估偏就会撞上 **429**：
+     *  - [fetchExamRaw] 走 `runCatching` 把异常吞成 null，调用方**分不出**
+     *    「限流」还是「网络错」，只能一律当失败 —— 那会白白浪费一轮；
+     *  - 本方法把 429 单独识别出来，按 [ExercisePumpEngine.RETRY_INTERVAL_MS]
+     *    重试，累计超过 [ExercisePumpEngine.RETRY_MAX_MS] 才放弃。
+     *
+     * 非 429 的失败（如 417/400）不重试 —— 那是协议/身份问题，等多久都没用。
+     *
+     * @param onRetry 每次重试前回调（给 UI 显示「限流等待中」）
+     * @return 成功的 [ExamData]；限流未解除或其它错误返回 null。
+     */
+    suspend fun fetchExamWithRetry(
+        keypointId: Int,
+        limit: Int,
+        onRetry: (String) -> Unit = {},
+    ): ExamData? {
+        val start = System.currentTimeMillis()
+        var tries = 0
+        while (true) {
+            tries++
+            val outcome = runCatching {
+                ServiceLocator.oral.getExamInfo(
+                    keypointId = keypointId.toString(),
+                    limit = limit.toString(),
+                )
+            }
+            outcome.getOrNull()?.let { return it }
+
+            val t = outcome.exceptionOrNull()
+            val code = (t as? retrofit2.HttpException)?.code()
+            val rateLimited = code == 429 || (t?.message?.contains("频繁") == true)
+            if (!rateLimited) {
+                // 非限流：等也没用，直接放弃（调用方会把它记成一轮失败）。
+                cn.apixiaoyuan.app.core.log.AppLogger.w(
+                    "Exercise",
+                    "出题失败（非限流）code=$code keypointId=$keypointId: ${t?.message}",
+                    t,
+                )
+                return null
+            }
+
+            val waited = System.currentTimeMillis() - start
+            if (waited >= ExercisePumpEngine.RETRY_MAX_MS) {
+                onRetry(
+                    "出题持续频控（已试 $tries 次 / ${waited / 1000}s）—— 放弃本轮",
+                )
+                return null
+            }
+            onRetry(
+                "出题被限流（HTTP 429），${ExercisePumpEngine.RETRY_INTERVAL_MS / 1000}s 后重试" +
+                    "（已等 ${waited / 1000}s）",
+            )
+            kotlinx.coroutines.delay(ExercisePumpEngine.RETRY_INTERVAL_MS)
+        }
+    }
+
+    /**
      * 提交练习结果（出题链路第四步）。
      *
      * PUT `/leo-math/android/exams/v2/{examId}`，body 带 `@NeedEncode`。

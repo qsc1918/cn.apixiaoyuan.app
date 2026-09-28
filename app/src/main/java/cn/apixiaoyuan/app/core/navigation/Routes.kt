@@ -67,6 +67,15 @@ data object RoutePk : Route
 @Serializable
 data object RouteExercise : Route
 
+/**
+ * 练习「刷对局」（二级页）—— 与网页端（pk-node）同做法的自动循环。
+ *
+ * 循环「出题 → 抄答案+笔迹 → 提交」，受**出题冷却 ≈62s/账号**配速。
+ * 与 [RouteExercise]（手动点题练习）不同：这里是无人值守的批量刷。
+ */
+@Serializable
+data object RouteExercisePump : Route
+
 /** 登录（二级页）。 */
 @Serializable
 data object RouteLogin : Route
