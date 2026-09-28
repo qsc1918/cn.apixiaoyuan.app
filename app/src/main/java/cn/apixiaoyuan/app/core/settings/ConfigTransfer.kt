@@ -165,8 +165,8 @@ object ConfigTransfer {
         OldSimianPrefs.pkStrokeCount = s.pkStrokeCount
             .coerceIn(OldSimianPrefs.PK_STROKE_COUNT_MIN, OldSimianPrefs.PK_STROKE_COUNT_MAX)
         OldSimianPrefs.pkStrokeIntervalMs = s.pkStrokeIntervalMs
-        OldSimianPrefs.h5DebugConsole = s.h5DebugConsole
             .coerceIn(OldSimianPrefs.PK_STROKE_INTERVAL_MIN, OldSimianPrefs.PK_STROKE_INTERVAL_MAX)
+        OldSimianPrefs.h5DebugConsole = s.h5DebugConsole
         OldSimianPrefs.persist()
 
         val t = config.theme

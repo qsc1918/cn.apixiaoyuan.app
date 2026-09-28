@@ -1,5 +1,6 @@
 package cn.apixiaoyuan.app.feature.exercise
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -168,6 +169,7 @@ fun ExercisePumpScreen(navController: AppNavController) {
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.defaultColors(
                         color = MiuixTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MiuixTheme.colorScheme.onSurfaceContainerHigh,
                     ),
                 ) {
                     Column(
@@ -326,7 +328,9 @@ private fun KeypointPickRow(
     onClick: () -> Unit,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         colors = CardDefaults.defaultColors(
             color = if (selected) {
                 MiuixTheme.colorScheme.primaryContainer
@@ -334,7 +338,6 @@ private fun KeypointPickRow(
                 MiuixTheme.colorScheme.surfaceContainer
             },
         ),
-        onClick = onClick,
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
@@ -354,29 +357,36 @@ private fun KeypointPickRow(
     }
 }
 
-/** 分组卡。 */
+/** 分组卡片：标题 + 若干行（与功能页同写法）。 */
 @Composable
 private fun SectionCard(title: String, content: @Composable () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.defaultColors(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            fontWeight = FontWeight.Medium,
+            color = MiuixTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.defaultColors(
+                color = MiuixTheme.colorScheme.surfaceContainer,
+                contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
+            ),
         ) {
-            Text(
-                text = title,
-                fontWeight = FontWeight.Medium,
-                color = MiuixTheme.colorScheme.onSurfaceContainer,
-            )
-            content()
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                content()
+            }
         }
     }
 }
 
 /** 数字输入行（提交即回写）。 */
 @Composable
+@Suppress("UNUSED_PARAMETER")
 private fun NumberField(
     label: String,
     value: String,
@@ -398,8 +408,11 @@ private fun NumberField(
                 text = v.filter { it.isDigit() }
                 text.toIntOrNull()?.let(onCommit)
             },
-            enabled = enabled,
             modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+            ),
         )
     }
 }

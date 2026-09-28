@@ -40,6 +40,7 @@ object OldSimianPrefs {
     private const val KEY_CUSTOM_ANSWER_TEXT = "custom_answer_text"
     private const val KEY_STROKE_ENABLED = "stroke_enabled"
     private const val KEY_CUSTOM_COST_ENABLED = "custom_cost_enabled"
+    private const val KEY_H5_DEBUG_CONSOLE = "h5_debug_console"
     private const val KEY_CUSTOM_COST_MS = "custom_cost_ms"
     private const val KEY_IGNORE_NICKNAME = "ignore_nickname_restriction"
     private const val KEY_CUSTOM_SCORE_ENABLED = "custom_score_enabled"
@@ -193,7 +194,7 @@ object OldSimianPrefs {
      * 与它们不同的是：Eruda 会**改变页面外观**（浮一个面板），
      * 所以默认**关**，只在排障时打开。
      */
-    var h5DebugConsole: Boolean by PrefDelegate(false)
+    var h5DebugConsole by mutableStateOf(false)
 
     // ---- 分数 ----
 
@@ -313,6 +314,7 @@ object OldSimianPrefs {
         customAnswerText = p.getString(KEY_CUSTOM_ANSWER_TEXT, "").orEmpty()
         strokeEnabled = p.getBoolean(KEY_STROKE_ENABLED, false)
         customCostEnabled = p.getBoolean(KEY_CUSTOM_COST_ENABLED, false)
+        h5DebugConsole = p.getBoolean(KEY_H5_DEBUG_CONSOLE, false)
         customCostMs = p.getInt(KEY_CUSTOM_COST_MS, MIN_COST_MS)
             .coerceIn(COST_RANGE_MIN, COST_RANGE_MAX)
         ignoreNicknameRestriction = p.getBoolean(KEY_IGNORE_NICKNAME, false)
@@ -343,6 +345,7 @@ object OldSimianPrefs {
             .putString(KEY_CUSTOM_ANSWER_TEXT, customAnswerText)
             .putBoolean(KEY_STROKE_ENABLED, strokeEnabled)
             .putBoolean(KEY_CUSTOM_COST_ENABLED, customCostEnabled)
+            .putBoolean(KEY_H5_DEBUG_CONSOLE, h5DebugConsole)
             .putInt(KEY_CUSTOM_COST_MS, customCostMs)
             .putBoolean(KEY_IGNORE_NICKNAME, ignoreNicknameRestriction)
             .putBoolean(KEY_CUSTOM_SCORE_ENABLED, customScoreEnabled)

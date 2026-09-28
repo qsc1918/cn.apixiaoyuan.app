@@ -237,7 +237,10 @@ object ExercisePumpEngine {
         var totalCost = 0L
         val questions = exam.questions.orEmpty().mapIndexed { idx, q ->
             val answer = q.rightAnswer ?: ""
-            val script = OralStrokes.scriptJson(answer, idx + 1)
+            // 笔迹：比较题（> / <）走弧线模板（pkArcScript），其它回落七段码字形。
+            // 与 PK 提交同一套：pk-node 实测「不带笔迹 → 服务端判 0 分」。
+            val script = OralStrokes.pkArcScript(answer, idx + 1)
+                ?: OralStrokes.scriptJson(answer)
             val cost = OldSimianPrefs.costTimeFor(per)
             totalCost += cost
             q.copy(
