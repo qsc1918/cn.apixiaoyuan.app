@@ -28,8 +28,21 @@ import android.webkit.WebView
  *  | `js/pk_no_anim.js`    | [OldSimianPrefs.noRankingAnim]  | CSS 动画/过渡归零 + 音效静音 |
  *  | `js/pk_auto_next.js`  | [OldSimianPrefs.autoNextRound]  | 结算页自动开下一局 |
  *  | `js/pk_auto_stroke.js`| [OldSimianPrefs.pkStrokeEnabled]| 题目页自动注入笔迹并提交 |
+ *  | `js/eruda.js`         | [OldSimianPrefs.h5DebugConsole] | 注入 Eruda 调试面板（移动端 DevTools）|
  *
- * 三者独立：只想去动画、不想自动连开、或只想自动交笔迹的人可以各开各的。
+ * 四者独立：只想去动画、不想自动连开、只想自动交笔迹、或只想开调试面板的人
+ * 可以各开各的。
+ *
+ * ## Eruda 调试面板（2026-09-28，对齐 WeKit 的 `ErudaConsole`）
+ *
+ * 参考项目 WeKit（`Ujhhgtg/WeKit`）往微信小程序 WebView 注入 Eruda 并
+ * `eruda.init()`。本项目同样处理，但**优势是容器是自己的**：
+ * 不需要像 WeKit 那样 hook 宿主的 `onPageFinished`（见其
+ * `WeWebViewApi.xwebOnPageFinished`）—— 我们的 [PkH5Screen] 直接调
+ * [WebView.evaluateJavascript] 即可。
+ *
+ * 注入 `assets/js/eruda.js` 后必须**再调一次** `eruda.init()` 才会浮出面板。
+ * Eruda 会改变页面外观，所以默认关、只在排障时打开。
  */
 object PkJsInjector {
 
@@ -52,7 +65,11 @@ object PkJsInjector {
      */
     fun injectIfEnabled(webView: WebView): Int {
         val prefs = OldSimianPrefs
-        if (!prefs.noRankingAnim && !prefs.autoNextRound && !prefs.pkStrokeEnabled) return 0
+        if (!prefs.noRankingAnim && !prefs.autoNextRound && !prefs.pkStrokeEnabled &&
+            !prefs.h5DebugConsole
+        ) {
+            return 0
+        }
         if (injected[webView] == true) return 0
         injected[webView] = true
 
@@ -82,6 +99,27 @@ object PkJsInjector {
                 null,
             )
             if (inject(webView, "js/pk_auto_stroke.js")) count++
+        }
+        // Eruda 调试面板：脚本 + `eruda.init()` 两步（缺 init 不浮面板）。
+        // 对齐 WeKit 的 `ErudaConsole`（它也是 evaluateJavascript 两次）。
+        if (prefs.h5DebugConsole) {
+            // 幂等：SPA 内部导航会多次触发 onPageFinished，重复 init 会叠出多个面板。
+            webView.evaluateJavascript(
+                "(function(){if(window.eruda&&window.eruda._isInit)return false;return true;})()",
+                android.webkit.ValueCallback { r ->
+                    if (r != "true") return@ValueCallback
+                    val ok = inject(webView, "js/eruda.js")
+                    if (ok) {
+                        // ★ 第二步：初始化面板。没有这句，脚本只加载不显示。
+                        webView.evaluateJavascript(
+                            "try{eruda.init({useShadowDom:true,defaultPanel:'console'});" +
+                                "eruda.get('console').config.set('displayTimestamps',true);" +
+                                "console.log('[老挂] Eruda 已注入');}catch(e){console.error('eruda.init 失败',e);}",
+                            null,
+                        )
+                    }
+                },
+            )
         }
         return count
     }

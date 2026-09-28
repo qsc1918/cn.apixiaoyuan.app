@@ -172,6 +172,29 @@ object OldSimianPrefs {
      */
     var ignoreNicknameRestriction by mutableStateOf(false)
 
+    // ---- H5 调试 ----
+
+    /**
+     * H5 调试台（注入 Eruda）。
+     *
+     * ## 为什么需要它（2026-09-28，对齐 WeKit 的 ErudaConsole）
+     *
+     * 参考项目 WeKit（`Ujhhgtg/WeKit`）的 `features/items/miniapps/ErudaConsole.kt`
+     * 做法是：**往 WebView 注入 [Eruda](https://github.com/liriliri/eruda) 调试面板**
+     * 并 `eruda.init()`。Eruda 是移动端 DevTools —— 在页面里浮一个面板，
+     * 能看 Console / Network / Elements / Storage。
+     *
+     * 对本项目尤其有用：PK 是 SPA，点击链路、`requestConfig` 的分支、
+     * H5 的登录态判定全在 JS 里，没有 DevTools 就只能靠加日志再打包。
+     *
+     * ## 与本项目其它注入脚本的关系
+     *
+     * 同属 [PkJsInjector] 的注入清单，独立开关、独立生效。
+     * 与它们不同的是：Eruda 会**改变页面外观**（浮一个面板），
+     * 所以默认**关**，只在排障时打开。
+     */
+    var h5DebugConsole: Boolean by PrefDelegate(false)
+
     // ---- 分数 ----
 
     /**

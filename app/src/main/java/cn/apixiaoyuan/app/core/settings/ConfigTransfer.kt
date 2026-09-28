@@ -67,6 +67,8 @@ data class OldSimianPrefsSnapshot(
     val pkStrokeEnabled: Boolean = false,
     val pkStrokeCount: Int = OldSimianPrefs.PK_STROKE_COUNT_DEFAULT,
     val pkStrokeIntervalMs: Int = OldSimianPrefs.PK_STROKE_INTERVAL_DEFAULT,
+    // ---- H5 调试 ----
+    val h5DebugConsole: Boolean = false,
 )
 
 /** 外观五项设置的快照。 */
@@ -113,6 +115,7 @@ object ConfigTransfer {
             pkStrokeEnabled = OldSimianPrefs.pkStrokeEnabled,
             pkStrokeCount = OldSimianPrefs.pkStrokeCount,
             pkStrokeIntervalMs = OldSimianPrefs.pkStrokeIntervalMs,
+            h5DebugConsole = OldSimianPrefs.h5DebugConsole,
         ),
         theme = ThemeSnapshot(
             mode = ThemePrefs.mode.name,
@@ -162,6 +165,7 @@ object ConfigTransfer {
         OldSimianPrefs.pkStrokeCount = s.pkStrokeCount
             .coerceIn(OldSimianPrefs.PK_STROKE_COUNT_MIN, OldSimianPrefs.PK_STROKE_COUNT_MAX)
         OldSimianPrefs.pkStrokeIntervalMs = s.pkStrokeIntervalMs
+        OldSimianPrefs.h5DebugConsole = s.h5DebugConsole
             .coerceIn(OldSimianPrefs.PK_STROKE_INTERVAL_MIN, OldSimianPrefs.PK_STROKE_INTERVAL_MAX)
         OldSimianPrefs.persist()
 

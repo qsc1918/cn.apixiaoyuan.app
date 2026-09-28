@@ -246,6 +246,20 @@ fun OldSimianScreen(
                 }
             }
 
+            // ==================== H5 调试 ====================
+            SectionCard(title = "H5 调试") {
+                SwitchRow(
+                    title = "Eruda 调试台",
+                    summary = "在 PK 的 H5 页面里注入 Eruda（移动端 DevTools）：" +
+                        "可看 Console / Network / Elements / Storage。" +
+                        "开启后下次打开 PK 页生效（会浮一个面板，排障用）",
+                    checked = OldSimianPrefs.h5DebugConsole,
+                    onCheckedChange = {
+                        OldSimianPrefs.h5DebugConsole = it
+                        OldSimianPrefs.persist()
+                    },
+                )
+            }
             // ==================== 分数 ====================
             SectionCard(title = "分数") {
                 SwitchRow(
