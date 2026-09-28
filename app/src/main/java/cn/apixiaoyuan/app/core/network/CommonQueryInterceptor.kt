@@ -89,8 +89,35 @@ class CommonQueryInterceptor(
         // 逐参数判断后：PK 显式带的 631/6/version=3.141.1 原样保留（不会被动成
         // 611/0.1.0），而它缺的 sign/platform/vendor/... 会被补上 —— 正好满足
         // PK 提交「631 + 全套公共参数 + sign」的协议要求。
-        val builder = url.newBuilder()
         var changed = false
+
+        /**
+         * ★ 先给查询串「重排序」：把 `_productId` 放到**最前**（2026-09-28，
+         * 对齐 pk-node 实测结论）。
+         *
+         * 原版真机 URL 恒为 `?_productId=611&platform=...&...&sign=...`；
+         * 我们原来是「缺哪个补哪个、全部追加」，`_productId` 落到末尾 →
+         * `POST /leo-gateway/android/accounts/switch` 直接 **400**，
+         * `/leo-profile/.../batchGet` 等主域端点同样受影响。
+         *
+         * 实现要点：`HttpUrl.newBuilder()` 会**保留**原 query，而
+         * `addQueryParameter` 是**追加**，所以不能靠 add 把它挪到最前 ——
+         * 必须先把 query 清空（`query(null)`），再按
+         * 「`_productId` 领先、其余保持原顺序」重建。
+         * 已带 `_productId` 的（如 PK 显式传 631）保留其**值**、只改位置。
+         */
+        val originalNames = url.queryParameterNames
+        val orderedParams = ArrayList<Pair<String, String>>(originalNames.size + 1)
+        var productIdValue: String? = null
+        for (name in originalNames) {
+            val value = url.queryParameter(name) ?: continue
+            if (name == PARAM_PRODUCT_ID) productIdValue = value else orderedParams.add(name to value)
+        }
+        val builder = url.newBuilder()
+        builder.query(null)
+        builder.addQueryParameter(PARAM_PRODUCT_ID, productIdValue ?: PRODUCT_ID)
+        for ((name, value) in orderedParams) builder.addQueryParameter(name, value)
+        changed = true
 
         fun ensure(name: String, value: String) {
             if (url.queryParameter(name) == null) {
@@ -98,8 +125,6 @@ class CommonQueryInterceptor(
                 changed = true
             }
         }
-
-        ensure(PARAM_PRODUCT_ID, PRODUCT_ID)
         ensure(PARAM_PLATFORM, "android$sdkInt")
         // ★ 用「主域协议版本」而不是 App 的 versionName：
         //   服务端只放行 3.140.1，App 版本 3.141.1 会被 solar-encoder 拦（见 NetworkConfig）。
