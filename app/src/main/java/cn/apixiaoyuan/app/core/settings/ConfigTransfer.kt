@@ -69,6 +69,8 @@ data class OldSimianPrefsSnapshot(
     val pkStrokeIntervalMs: Int = OldSimianPrefs.PK_STROKE_INTERVAL_DEFAULT,
     // ---- H5 调试 ----
     val h5DebugConsole: Boolean = false,
+    // ---- 练习刷对局 ----
+    val exerciseCooldownMs: Int = OldSimianPrefs.EXERCISE_COOLDOWN_DEFAULT,
 )
 
 /** 外观五项设置的快照。 */
@@ -116,6 +118,7 @@ object ConfigTransfer {
             pkStrokeCount = OldSimianPrefs.pkStrokeCount,
             pkStrokeIntervalMs = OldSimianPrefs.pkStrokeIntervalMs,
             h5DebugConsole = OldSimianPrefs.h5DebugConsole,
+            exerciseCooldownMs = OldSimianPrefs.exerciseCooldownMs,
         ),
         theme = ThemeSnapshot(
             mode = ThemePrefs.mode.name,
@@ -167,6 +170,11 @@ object ConfigTransfer {
         OldSimianPrefs.pkStrokeIntervalMs = s.pkStrokeIntervalMs
             .coerceIn(OldSimianPrefs.PK_STROKE_INTERVAL_MIN, OldSimianPrefs.PK_STROKE_INTERVAL_MAX)
         OldSimianPrefs.h5DebugConsole = s.h5DebugConsole
+        OldSimianPrefs.exerciseCooldownMs = s.exerciseCooldownMs
+            .coerceIn(
+                OldSimianPrefs.EXERCISE_COOLDOWN_MIN,
+                OldSimianPrefs.EXERCISE_COOLDOWN_MAX,
+            )
         OldSimianPrefs.persist()
 
         val t = config.theme

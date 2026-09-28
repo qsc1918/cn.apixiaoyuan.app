@@ -48,6 +48,7 @@ object OldSimianPrefs {
     private const val KEY_CUSTOM_SCORE_KEYPOINT = "custom_score_keypoint"
     private const val KEY_CUSTOM_SCORE_LIMIT = "custom_score_limit"
     private const val KEY_CUSTOM_SCORE_INTERVAL_MS = "custom_score_interval"
+    private const val KEY_EXERCISE_COOLDOWN_MS = "exercise_cooldown_ms"
     private const val KEY_AUTO_NEXT_ROUND = "auto_next_round"
     private const val KEY_NEXT_ROUND_INTERVAL_MS = "next_round_interval_ms"
     private const val KEY_NO_RANKING_ANIM = "no_ranking_anim"
@@ -84,6 +85,18 @@ object OldSimianPrefs {
     const val SCORE_INTERVAL_MIN = 0
     const val SCORE_INTERVAL_MAX = 60_000
     const val SCORE_INTERVAL_DEFAULT = 2000
+
+    /**
+     * 练习刷对局的出题冷却默认值（毫秒）。
+     *
+     * 实测（2026-09-28）当前服务端已放宽出题频率，**连 1 秒都不需要**，
+     * 因此默认取 1000。可在刷对局页自由配置（0 = 不等）。
+     */
+    const val EXERCISE_COOLDOWN_DEFAULT = 1000
+
+    /** 出题冷却可配置范围（毫秒）。 */
+    const val EXERCISE_COOLDOWN_MIN = 0
+    const val EXERCISE_COOLDOWN_MAX = 300_000
 
     /**
      * 刷分知识点自动扫描上限。
@@ -244,6 +257,13 @@ object OldSimianPrefs {
     /** 刷分每局间隔（毫秒），用于降低请求频率。范围 [SCORE_INTERVAL_MIN]..[SCORE_INTERVAL_MAX]。 */
     var customScoreIntervalMs by mutableStateOf(SCORE_INTERVAL_DEFAULT)
 
+    /**
+     * 练习刷对局的出题冷却（毫秒）。
+     *
+     * 实测服务端已放宽，默认 1s；0 = 不额外等待（仍受 429 重试保护）。
+     */
+    var exerciseCooldownMs by mutableStateOf(EXERCISE_COOLDOWN_DEFAULT)
+
     // ---- PK / H5 ----
 
     /**
@@ -324,6 +344,7 @@ object OldSimianPrefs {
         customScoreLimit = p.getInt(KEY_CUSTOM_SCORE_LIMIT, SCORE_LIMIT_DEFAULT)
             .coerceIn(SCORE_LIMIT_MIN, SCORE_LIMIT_MAX)
         customScoreIntervalMs = p.getInt(KEY_CUSTOM_SCORE_INTERVAL_MS, SCORE_INTERVAL_DEFAULT)
+        exerciseCooldownMs = p.getInt(KEY_EXERCISE_COOLDOWN_MS, EXERCISE_COOLDOWN_DEFAULT)
             .coerceIn(SCORE_INTERVAL_MIN, SCORE_INTERVAL_MAX)
         autoNextRound = p.getBoolean(KEY_AUTO_NEXT_ROUND, false)
         nextRoundIntervalMs = p.getInt(KEY_NEXT_ROUND_INTERVAL_MS, 1500)
@@ -353,6 +374,7 @@ object OldSimianPrefs {
             .putString(KEY_CUSTOM_SCORE_KEYPOINT, customScoreKeypoint)
             .putInt(KEY_CUSTOM_SCORE_LIMIT, customScoreLimit)
             .putInt(KEY_CUSTOM_SCORE_INTERVAL_MS, customScoreIntervalMs)
+            .putInt(KEY_EXERCISE_COOLDOWN_MS, exerciseCooldownMs)
             .putBoolean(KEY_AUTO_NEXT_ROUND, autoNextRound)
             .putInt(KEY_NEXT_ROUND_INTERVAL_MS, nextRoundIntervalMs)
             .putBoolean(KEY_NO_RANKING_ANIM, noRankingAnim)

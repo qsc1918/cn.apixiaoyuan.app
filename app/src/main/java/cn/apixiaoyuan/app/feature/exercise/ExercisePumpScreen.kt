@@ -26,6 +26,7 @@ import cn.apixiaoyuan.app.core.exercise.ExercisePumpEngine
 import cn.apixiaoyuan.app.core.exercise.ExerciseRepository
 import cn.apixiaoyuan.app.core.model.ExerciseScopeKeypoint
 import cn.apixiaoyuan.app.core.navigation.AppNavController
+import cn.apixiaoyuan.app.core.oldsimian.OldSimianPrefs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Button
@@ -52,7 +53,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * ## ★ 两个关键点（都在界面上写明，避免用户误判为 bug）
  *
- * 1. **出题冷却 ≈62s 是账号级硬下限** —— 配得比它小**不会更快**（会 429）。
+ * 1. **出题冷却可配置，默认 1s** —— 2026-09-28 实测：服务端已放宽，
+ *    **连 1 秒都不需要**（此前按 pk-node 结论的 62s 已过时）。
+ *    设 0 等于不等；即便撞 429 也有自动重试兜底。
  * 2. **建议每局 100 题** —— 冷却按「次」算不按题数，100 题 = 200 经验，
  *    比 10 题（20 经验）划算 10 倍。
  */
@@ -118,13 +121,24 @@ fun ExercisePumpScreen(navController: AppNavController) {
                     onCommit = { vm.rounds = it.coerceAtLeast(1) },
                 )
                 NumberField(
+                    label = "出题冷却 ms（实测已放宽，默认 1000；0 = 不等，仍受 429 重试保护）",
+                    value = vm.cooldownMs.toString(),
+                    enabled = !vm.running,
+                    onCommit = {
+                        vm.cooldownMs = it.coerceIn(
+                            OldSimianPrefs.EXERCISE_COOLDOWN_MIN,
+                            OldSimianPrefs.EXERCISE_COOLDOWN_MAX,
+                        )
+                    },
+                )
+                NumberField(
                     label = "每局题数（建议 100 —— 冷却按次算，题多更划算）",
                     value = vm.limit.toString(),
                     enabled = !vm.running,
                     onCommit = { vm.limit = it.coerceIn(1, 1000) },
                 )
                 NumberField(
-                    label = "每轮间隔下限 ms（出题冷却 ≈62000 是硬下限，配更小不会更快）",
+                    label = "每轮间隔下限 ms（与冷却取 max；冷却已可设很小，这里通常填 0）",
                     value = vm.gapMinMs.toString(),
                     enabled = !vm.running,
                     onCommit = { vm.gapMinMs = it.coerceAtLeast(0) },
@@ -215,6 +229,8 @@ class ExercisePumpViewModel : ViewModel() {
 
     var rounds by mutableStateOf(1)
     var limit by mutableStateOf(ExercisePumpEngine.DEFAULT_LIMIT)
+    /** 出题冷却（ms）。默认取自持久化偏好（1000 = 1s，实测已够）。 */
+    var cooldownMs by mutableStateOf(OldSimianPrefs.exerciseCooldownMs)
     var gapMinMs by mutableStateOf(0)
     var gapMaxMs by mutableStateOf(0)
 
@@ -279,13 +295,18 @@ class ExercisePumpViewModel : ViewModel() {
         val l = limit
         val gMin = gapMinMs.toLong()
         val gMax = gapMaxMs.toLong()
-        append("开始：keypointId=$kp 轮数=$n 每局=$l 题 间隔=[$gMin,$gMax]ms")
+        val cd = cooldownMs.toLong()
+        // 冷却属于「配置」而非「本次运行参数」：写回偏好，下次进来还在。
+        OldSimianPrefs.exerciseCooldownMs = cooldownMs
+        OldSimianPrefs.persist()
+        append("开始：keypointId=$kp 轮数=$n 每局=$l 题 冷却=${cd}ms 间隔=[$gMin,$gMax]ms")
         job = viewModelScope.launch {
             val summary = runCatching {
                 ExercisePumpEngine.practiceLoop(
                     keypointId = kp,
                     rounds = n,
                     limit = l,
+                    cooldownMs = cd,
                     gapMinMs = gMin,
                     gapMaxMs = gMax,
                     onProgress = { done, total, ev ->

@@ -31,10 +31,11 @@ import kotlin.random.Random
  *        4. 经验 = 服务端判对的题数 × 2
  * ```
  *
- * ## ★ 配速：出题冷却 ≈[MATCH_COOLDOWN_MS]（账号级，硬下限）
+ * ## ★ 配速：出题冷却**可配置**（默认 [DEFAULT_COOLDOWN_MS] = 1s）
  *
- * 服务端按**账号**限制出题频率，实测 ≈62s。配得比它小**不会更快**（会 429）。
- * 本引擎与网页端同一套语义：
+ * **2026-09-28 实测更新**：此前按 pk-node 结论取 62s（账号级硬下限），
+ * 但用户实测**当前出题连 1 秒都不需要** —— 服务端已放宽，故默认 1s 且可自由配置。
+ * 本引擎与网页端仍是同一套配速语义：
  *
  * ```
  * 实际等待 = max(冷却剩余, 随机(gapMinMs, gapMaxMs))
@@ -60,14 +61,30 @@ import kotlin.random.Random
 object ExercisePumpEngine {
 
     /**
-     * 出题冷却（毫秒）——**账号级硬下限**。
+     * 出题冷却的**默认值**（毫秒）。
      *
-     * 与 pk-node `MATCH_COOLDOWN_MS = 62_000` 同值。实测服务端按账号限，
-     * 低于它会 429；所以本引擎把它当**下沿**而不是可配置项。
+     * ## ★ 2026-09-28 实测更新：冷却已不再是瓶颈
+     *
+     * 此前按 pk-node 的结论取 62_000（账号级硬下限）。**用户实测当前出题
+     * 连 1 秒都不需要** —— 服务端已放宽该限制，故默认改为 1_000，
+     * 并允许在界面上自由配置（见 [practiceLoop] 的 `cooldownMs`）。
+     *
+     * 冷却机制本身仍保留：它同时是「每轮间隔的下沿」
+     * （语义 `max(冷却剩余, 随机间隔)`）。即便设为 0，[RETRY_INTERVAL_MS]
+     * 的 429 重试仍会兜底。
      */
-    const val MATCH_COOLDOWN_MS = 62_000L
+    const val DEFAULT_COOLDOWN_MS = 1_000L
 
-    /** 从冷却下沿往回退的安全边距（毫秒）。避免卡在边界上被 429。 */
+    /** 冷却的可配置范围（毫秒）。0 = 不额外等待（仍受 429 重试保护）。 */
+    const val COOLDOWN_MIN_MS = 0L
+    const val COOLDOWN_MAX_MS = 300_000L
+
+    /**
+     * 从冷却下沿往回退的安全边距（毫秒）。
+     *
+     * 冷却配得保守时才起效；配成 0/1s 时无实际影响
+     * （`cooldownLeft` 已被 `coerceAtLeast(0)` 截断）。
+     */
     const val COOLDOWN_SAFETY_MS = 1_000L
 
     /** 命中 429 后的重试间隔（毫秒）。同 pk-node `MATCH_RETRY_INTERVAL_MS`。 */
@@ -88,6 +105,8 @@ object ExercisePumpEngine {
      * @param keypointId 知识点 ID（由调用方从 [ExerciseRepository.fetchMathScope] 选）
      * @param rounds     轮数（≥1）
      * @param limit      每局题数（建议 [DEFAULT_LIMIT]）
+     * @param cooldownMs 出题冷却（毫秒）——**可配置**，默认 [DEFAULT_COOLDOWN_MS]（1s）。
+     *                   实测服务端已放宽；设 0 等于不等。
      * @param gapMinMs   每轮间隔下限（与冷却取 max）
      * @param gapMaxMs   每轮间隔上限（随机抖动）
      * @param costTimeMs 每题耗时（null = 用 [OldSimianPrefs] 的配置；下限 5ms）
@@ -98,6 +117,7 @@ object ExercisePumpEngine {
         keypointId: Int,
         rounds: Int = DEFAULT_ROUNDS,
         limit: Int = DEFAULT_LIMIT,
+        cooldownMs: Long = DEFAULT_COOLDOWN_MS,
         gapMinMs: Long = 0L,
         gapMaxMs: Long = 0L,
         costTimeMs: Long? = null,
@@ -119,7 +139,8 @@ object ExercisePumpEngine {
 
             // ---- 每轮间隔：冷却剩余 与 随机间隔 取大者（与 pk-node 同语义）----
             if (lastMatchOkAt > 0) {
-                val cooldownLeft = (lastMatchOkAt + MATCH_COOLDOWN_MS - COOLDOWN_SAFETY_MS -
+                val cd = cooldownMs.coerceIn(COOLDOWN_MIN_MS, COOLDOWN_MAX_MS)
+                val cooldownLeft = (lastMatchOkAt + cd - COOLDOWN_SAFETY_MS -
                     System.currentTimeMillis()).coerceAtLeast(0L)
                 val gap = if (gapMax > gapMin) {
                     gapMin + Random.nextLong(gapMax - gapMin + 1)
