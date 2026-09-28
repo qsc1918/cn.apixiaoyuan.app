@@ -156,7 +156,33 @@ object PkBattleEngine {
                 val body = PkBattleRepository.buildSubmitBody(match, costTimeMs, strokeMode)
                 onEvent("提交中…")
                 PkBattleRepository.submit(mode, body)
-                onEvent("提交成功")
+                // ★ 提交 200 ≠ 已结算（2026-09-28，对齐 pk-node）：
+                //   提交被 403 的局，服务端同样留 {correctCnt:0, questions:null} 的占位记录。
+                //   必须再查一次结算明细，以服务端结算为准 —— 否则会把「没算上」报成成功。
+                val pkIdStr = body.pkIdStr
+                val settle = if (pkIdStr.isNullOrBlank()) {
+                    null
+                } else {
+                    onEvent("提交成功，核对结算…")
+                    PkBattleRepository.fetchHistoryDetail(pkIdStr)
+                }
+                when {
+                    settle == null -> {
+                        // 查询失败（网络/超时）：不能断言失败 —— 真机上可能只是历史还没落库。
+                        onEvent("提交成功（结算明细未取到，无法确认是否计入）")
+                    }
+                    settle.settled -> {
+                        onEvent("已结算：答对 ${settle.correctCnt}/${settle.questionCnt} 题")
+                    }
+                    else -> {
+                        onEvent(
+                            "⚠ 服务端未结算（correctCnt=${settle.correctCnt}, " +
+                                "questions=${if (settle.questions == null) "null" else settle.questions.size}）" +
+                                "—— 这局没算上"
+                        )
+                        return false
+                    }
+                }
                 return true
             } catch (c: CancellationException) {
                 throw c

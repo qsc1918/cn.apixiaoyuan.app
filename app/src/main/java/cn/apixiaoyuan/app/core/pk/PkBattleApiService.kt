@@ -97,6 +97,29 @@ interface PkBattleApiService {
         @Query("version") version: String = PK_VERSION,
     ): ResponseBody
 
+    /**
+     * 结算明细核对：`GET /leo-game-pk/android/math/pk/history/detail?pkIdStr=X`。
+     *
+     * ## ★ 为什么必须调它（2026-09-28，对齐 pk-node）
+     *
+     * **提交返回 200 ≠ 这局已结算。** 提交被 403 的局，服务端同样留一条
+     * `{correctCnt:0, questions:null}` 的**占位记录** —— 只看提交结果会把
+     * 「其实没算上」报成成功。这是最难查的一类假阳性。
+     *
+     * 本接口是结算页 `result.html?pkIdStr=X` 的主数据源，故用它判定
+     * 才是「以服务端结算为准」。
+     *
+     * 响应是**明文 JSON**（不是加密体），所以**不加 `@NeedDecode`**。
+     */
+    @BaseUrl(BASE_LEO)
+    @GET("/leo-game-pk/android/math/pk/history/detail")
+    suspend fun historyDetail(
+        @Query("pkIdStr") pkIdStr: String,
+        @Query("_productId") productId: String = PK_PRODUCT_ID,
+        @Query("_appId") appId: String = PK_APP_ID,
+        @Query("version") version: String = PK_VERSION,
+    ): PkHistoryDetail
+
     // ---- 提交（@NeedEncode）----
 
     @BaseUrl(BASE_LEO)

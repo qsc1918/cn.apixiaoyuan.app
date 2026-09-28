@@ -225,3 +225,41 @@ enum class PkStrokeMode(val displayName: String) {
     /** 七段码折线（稀疏点）—— 可能被服务端判作弊 403，仅做对照。 */
     SEVEN_SEGMENT("七段码"),
 }
+
+/**
+ * PK 结算明细（`GET /leo-game-pk/android/math/pk/history/detail?pkIdStr=X`）。
+ *
+ * ## ★ 为什么必须核对（2026-09-28，对齐 pk-node）
+ *
+ * **提交返回 200 只代表「服务端收下了」，不代表这局已结算。**
+ * pk-node 实测两种情况（同一条 pkIdStr 事后查）：
+ * ```
+ * 提交成功的局   → {correctCnt:20, questions:[...]}   // 有逐题明细
+ * 提交被 403 的局 → {correctCnt:0,  questions:null}    // 服务端仍留占位记录
+ * ```
+ * 所以只信提交的 HTTP 200 会把「其实没算上」的局报成成功 —— 这是最难查的一类假阳性。
+ *
+ * 本接口同时是**结算页** `result.html?pkIdStr=X` 的主数据源
+ * （H5 bundle `Result-legacy` 的 `getPkExerciseResult(pkIdStr)`）。
+ *
+ * @param pkIdStr    对局 ID（来自出题响应的 `pkIdStr`）
+ * @param correctCnt 服务端认定的答对题数；**0 且 questions 为 null = 未结算**
+ * @param questions  逐题明细；null = 未结算
+ */
+@Serializable
+data class PkHistoryDetail(
+    @SerialName("pkIdStr") val pkIdStr: String? = null,
+    @SerialName("correctCnt") val correctCnt: Int = 0,
+    @SerialName("questionCnt") val questionCnt: Int = 0,
+    @SerialName("questions") val questions: List<PkQuestion>? = null,
+) {
+    /**
+     * 是否已真正结算。
+     *
+     * 判据（对齐 pk-node）：**有逐题明细**（`questions != null`）且答对数 > 0。
+     * 只看 `correctCnt > 0` 不够 —— 服务端的占位记录 `questions` 是 null，
+     * 那种情况下即便 correctCnt 非 0 也不可信。
+     */
+    val settled: Boolean
+        get() = questions != null && correctCnt > 0
+}

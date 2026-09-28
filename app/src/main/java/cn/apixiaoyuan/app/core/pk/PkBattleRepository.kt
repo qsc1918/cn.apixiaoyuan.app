@@ -95,6 +95,30 @@ object PkBattleRepository {
     }
 
     /**
+     * 核对结算：`GET /leo-game-pk/android/math/pk/history/detail?pkIdStr=X`。
+     *
+     * ## ★ 为什么提交成功后还要求一次（2026-09-28，对齐 pk-node）
+     *
+     * **提交返回 200 ≠ 这局已结算。** 提交被 403 的局，服务端同样留一条
+     * `{correctCnt:0, questions:null}` 的占位记录 —— 只看提交结果会把
+     * 「其实没算上」报成成功。这是最难查的一类假阳性（日志说成功、分数没涨）。
+     *
+     * 本接口就是结算页 `result.html?pkIdStr=X` 的主数据源，以它为准才对得上真机。
+     *
+     * @return 结算明细；网络失败返回 null（**不代表没结算**，只是没查到 ——
+     *         调用方应据此降级提示，而不是直接判失败）。
+     */
+    suspend fun fetchHistoryDetail(pkIdStr: String): PkHistoryDetail? = runCatching {
+        ServiceLocator.pkBattle.historyDetail(pkIdStr)
+    }.onFailure {
+        cn.apixiaoyuan.app.core.log.AppLogger.w(
+            "PkBattle",
+            "结算核对失败 pkIdStr=$pkIdStr: ${it.message}",
+            it,
+        )
+    }.getOrNull()
+
+    /**
      * 把 Retrofit 的 [retrofit2.HttpException] 换成带 body 的 [PkHttpException]，
      * 并把「状态码 + body + 是否频控」落进日志页。
      *
