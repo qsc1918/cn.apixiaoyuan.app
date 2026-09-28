@@ -74,7 +74,7 @@ jobs:
             echo "已从 secret 恢复 keystore.jks，将产出签名 APK"
           else
             echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "未配置 KEYSTORE_BASE64，降级为 unsigned APK"
+            echo "未配置 KEYSTORE_BASE64：release 将回落到 build.gradle.kts 里的 debug 签名兜底（APK 仍可安装，但签名身份是 Android Debug）"
           fi
 
       - name: Build release
