@@ -83,6 +83,23 @@ data object RouteScorePump : Route
 @Serializable
 data object RoutePkGrind : Route
 
+/**
+ * 刷分区（二级页）—— 从主页进入的刷分总控。
+ *
+ * ## 为什么要有这个页（2026-09-28 用户要求）
+ *
+ * 刷分相关入口原先散在「功能」tab 里（PK 刷对局 / 自定义分数 / 练习页各自一个），
+ * 用户希望**主页集中一个刷分区**，点进去就是「和 pk-node 差不多的功能」，
+ * 三个选项一目了然：
+ *  - PK 刷对局（[RoutePkGrind]）；
+ *  - 练习刷对局（[RouteExercise]，练习闭环：知识点 → 出题 → 提交 → 经验）；
+ *  - 直接刷分（[RouteScorePump]）。
+ *
+ * 功能页（[RouteOldSimian]）里对应的「分数」段已迁到本区，不再重复。
+ */
+@Serializable
+data object RouteGrind : Route
+
 /** 账号页（宝贝学习账号切换 + 改密码）。 */
 @Serializable
 data object RouteAccount : Route

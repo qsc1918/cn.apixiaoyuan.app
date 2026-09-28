@@ -80,13 +80,17 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *    `postSavedExp` 的实际落点，**服务端限次（真机实测每天约 3 次）**，
  *    根本不是刷分该走的接口。
  *
- * ## 未接入（明确标注，不摆空壳骗自己）
+ * ## 「无视名字限制」**已接入**（2026-09-28 更正）
  *
- *  - **无视名字限制**：本项目暂无昵称编辑入口；且昵称校验最终由服务端执行，
- *    客户端放开本地校验没有实际意义。等接入「个人资料编辑」时再接。
- *    （`LeoProfileApiService.updateUserInfo` 已存在可直接复用，但
- *    `UserVO.userId` / `primaryUserId` 是非空 `Int`，直接构造会输出
- *    `"userId":0` 污染请求，必须新建专用 body 类。）
+ * 本页此前有一行 **disabled 的占位开关**（写「待接入个人资料编辑」），
+ * 那是**过时的死开关** —— 该功能实际已在**账号页**落地：
+ *  - 开关 UI：`feature/account/AccountScreen.kt`（「无视名字限制」卡片）；
+ *  - 生效逻辑：`AccountViewModel.rename()` 读
+ *    `OldSimianPrefs.ignoreNicknameRestriction` —— 打开即跳过客户端全部昵称校验
+ *    （长度/字符/敏感词），原样提交给服务端；关闭时本地限制 16 字符。
+ *
+ * 故本页**删除了那行死开关**（避免「显示未接入但实际已接入」的误导），
+ * 需要开关请到账号页。
  */
 @Composable
 fun OldSimianScreen(
@@ -262,16 +266,6 @@ fun OldSimianScreen(
                 }
             }
 
-            // ==================== 待接入 ====================
-            SectionCard(title = "待接入") {
-                SwitchRow(
-                    title = "无视名字限制",
-                    summary = "待接入「个人资料编辑」后启用：本项目当前无昵称编辑链路",
-                    checked = OldSimianPrefs.ignoreNicknameRestriction,
-                    enabled = false,
-                    onCheckedChange = {},
-                )
-            }
 
             // ==================== 说明 ====================
             Card(

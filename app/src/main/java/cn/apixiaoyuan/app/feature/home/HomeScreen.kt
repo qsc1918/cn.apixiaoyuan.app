@@ -44,6 +44,7 @@ import cn.apixiaoyuan.app.core.navigation.Route
 import cn.apixiaoyuan.app.core.navigation.RouteAccount
 import cn.apixiaoyuan.app.core.navigation.RouteApi
 import cn.apixiaoyuan.app.core.navigation.RouteExercise
+import cn.apixiaoyuan.app.core.navigation.RouteGrind
 import cn.apixiaoyuan.app.core.navigation.RouteLogin
 import cn.apixiaoyuan.app.core.navigation.RoutePk
 import cn.apixiaoyuan.app.core.navigation.RouteSamples
@@ -105,6 +106,9 @@ fun HomeScreen(navController: AppNavController) {
             )
 
             val entries = listOf(
+                // 刷分区放最前（2026-09-28 用户要求）：刷分是主路径，
+                // 「点进去就是和 pk-node 差不多的功能」—— 内部再分三链路。
+                QuickEntry("刷分区", "Grind", "PK 刷局 / 练习刷局 / 直接刷分", RouteGrind),
                 QuickEntry("登录", "Login", "账号域 cookie 登录", RouteLogin),
                 // 接口控制台提到首页快捷入口（待办 9）：它现在是「直接调用应用 okhttp」
                 // 的调试口，改完一个拦截器就要点一次，藏在「功能」tab 里来回切太慢。

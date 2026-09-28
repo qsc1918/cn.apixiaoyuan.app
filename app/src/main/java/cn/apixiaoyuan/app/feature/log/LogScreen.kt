@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -112,6 +114,11 @@ fun LogScreen(navController: AppNavController) {
         val topInset = LocalTopBarInset.current
         val scrollLimit = LocalScrollBottomLimit.current
         Column(modifier = Modifier.fillMaxWidth()) {
+            // ★ 顶栏占位（2026-09-28 修）：工具条原本紧贴 Column 顶部，被
+            //   **透明顶栏**完全盖住。顶栏高度必须作为本 Column 的**首个子项**
+            //   占位 —— 只把它加到下面的 LazyColumn 里是没用的，工具条仍在
+            //   顶栏之下（这正是本页此前的问题）。
+            Spacer(Modifier.height(topInset))
             // ==================== 工具条（不参与滚动）====================
             LogToolbar(
                 kind = kind,
@@ -152,7 +159,8 @@ fun LogScreen(navController: AppNavController) {
                     state = listState,
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(
-                        top = topInset,
+                        // 顶栏占位已由外层 Column 的首个 Spacer 完成，此处为 0。
+                        top = 0.dp,
                         bottom = pad.calculateBottomPadding() + scrollLimit + 24.dp,
                         start = 12.dp,
                         end = 12.dp,
@@ -166,7 +174,8 @@ fun LogScreen(navController: AppNavController) {
                     state = listState,
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(
-                        top = topInset,
+                        // 顶栏占位已由外层 Column 的首个 Spacer 完成，此处为 0。
+                        top = 0.dp,
                         bottom = pad.calculateBottomPadding() + scrollLimit + 24.dp,
                         start = 12.dp,
                         end = 12.dp,
