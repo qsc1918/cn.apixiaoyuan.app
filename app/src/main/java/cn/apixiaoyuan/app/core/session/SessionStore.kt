@@ -39,6 +39,15 @@ object SessionStore {
     private const val KEY_NICKNAME = "current_nickname"
     private const val KEY_AVATAR = "current_avatar_url"
 
+    /**
+     * 设备链 cookie 的名字前缀（`ks_r` / `ks_u` / `ks_persistent` / `ks_deviceid` …）。
+     *
+     * 这类 cookie 的 **value 落盘前要加密**（用户要求，2026-09-28）。
+     * `ks_deviceid` 是**设备级**标识（跨账号同一台设备不变），泄漏面比普通
+     * 会话 cookie 更大 —— 拿到它就能在别处伪装成同一台设备。
+     */
+    private const val DEVICE_CHAIN_PREFIX = "ks_"
+
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Volatile
@@ -86,10 +95,19 @@ object SessionStore {
         @SerialName("secure") val secure: Boolean = false,
     )
 
-    /** 写入完整 cookie 列表（登录成功后调用）。 */
+    /**
+     * 写入完整 cookie 列表（登录成功后调用）。
+     *
+     * ## 设备链 `ks_*` 的值在**落盘前加密**（2026-09-28）
+     *
+     * 用户要求：设备链不得明文存库。[DeviceChainCipher] 用 Android Keystore
+     * 的 AES-GCM 只加密 **value**（`name/domain/path` 保持明文，便于筛选）。
+     * 幂等：已是密文的不重复加密，因此反复保存不会套娃。
+     */
     fun saveCookies(cookies: List<CookieEntry>) {
-        prefs().edit().putString(KEY_COOKIES, json.encodeToString(cookies)).apply()
-        // sid 或 userid 存在即视为有登录态
+        val toStore = cookies.map { it.encryptedForStorage() }
+        prefs().edit().putString(KEY_COOKIES, json.encodeToString(toStore)).apply()
+        // sid 或 userid 存在即视为有登录态（userid 不加密，直接读原值）
         cookies.firstOrNull { it.name == "userid" }?.value?.toLongOrNull()?.let {
             prefs().edit().putLong(KEY_YFD_U, it).apply()
         }
@@ -169,10 +187,18 @@ object SessionStore {
         return parsed.size
     }
 
-    /** 读出全部 cookie；无会话时返回空表。 */
+    /**
+     * 读出全部 cookie；无会话时返回空表。
+     *
+     * **`ks_*` 的值在此透明解密** —— 调用方拿到的永远是明文，
+     * 无需关心存储形态。历史明文数据 [DeviceChainCipher.decrypt] 会原样返回，
+     * 所以不需要额外的迁移步骤。
+     */
     fun loadCookies(): List<CookieEntry> {
         val raw = prefs().getString(KEY_COOKIES, null) ?: return emptyList()
-        return runCatching { json.decodeFromString<List<CookieEntry>>(raw) }.getOrDefault(emptyList())
+        val list = runCatching { json.decodeFromString<List<CookieEntry>>(raw) }
+            .getOrDefault(emptyList())
+        return list.map { it.decryptedFromStorage() }
     }
 
     /** 取某个 cookie 的值，没有返回 null。 */
@@ -221,6 +247,28 @@ object SessionStore {
         saveCookies(current)
         return true
     }
+
+    /**
+     * 落盘前的形态：`ks_*` 的 value 加密，其余原样。
+     *
+     * 只对 `ks_` 前缀加密 —— 用户要求的是「设备链加密」，不是「全部 cookie 加密」；
+     * 其余 cookie（sid / sess / userid 等）体积小、变动频繁且与存储层其它逻辑
+     * 耦合较多，贸然全量加密会扩大改动面。
+     */
+    private fun CookieEntry.encryptedForStorage(): CookieEntry =
+        if (name.startsWith(DEVICE_CHAIN_PREFIX)) {
+            copy(value = DeviceChainCipher.encrypt(value) ?: value)
+        } else {
+            this
+        }
+
+    /** 读出形态：`ks_*` 的 value 解密（非密文原样返回，兼容历史明文）。 */
+    private fun CookieEntry.decryptedFromStorage(): CookieEntry =
+        if (name.startsWith(DEVICE_CHAIN_PREFIX)) {
+            copy(value = DeviceChainCipher.decrypt(value) ?: value)
+        } else {
+            this
+        }
 
     /**
      * 当前登录用户 ID（`YFD_U` 的取值）。
