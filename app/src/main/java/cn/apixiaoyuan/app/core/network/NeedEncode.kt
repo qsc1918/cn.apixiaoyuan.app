@@ -8,8 +8,19 @@ import okhttp3.MediaType.Companion.toMediaType
  * 与 [NeedDecode] 方向相反：`@NeedDecode` 处理响应，本注解处理请求。
  *
  * 已确证需编码的接口：
- *  - `uploadExamResult`（`PUT /leo-math/android/exams/v2/{examId}`，练习成绩上传）
  *  - `postSavedExp`（`POST /leo-star/android/exercise/rank/login/attend`）
+ *
+ * ⚠️ **`uploadExamResult` 不在其列**（2026-09-28 修正）：
+ * 练习提交是**旧路径 `PUT /leo-math/android/exams/{examId}` + JSON 明文**，
+ * **不编码**。pk-node 实测对照：
+ * ```
+ * PUT .../exams/v2/{examId} + gzip+编码  → 400
+ * PUT .../exams/v2/{examId} + 明文 JSON  → 400
+ * PUT .../exams/{examId}  + octet-stream → 415（Content-Type 不支持）
+ * PUT .../exams/{examId}  + JSON 明文    → 200 ✅
+ * ```
+ * **练习与 PK 的编码纪律相反**（PK 提交必须 gzip+编码 + octet-stream），
+ * 不要互相套用。
  *
  * 编码链路（原版逐行读出）：请求体字节 → gzip 压缩 → `libContentEncoder.so`
  * 的 `c()`。与响应解码链路互逆，共用同一个 so。真实实现见

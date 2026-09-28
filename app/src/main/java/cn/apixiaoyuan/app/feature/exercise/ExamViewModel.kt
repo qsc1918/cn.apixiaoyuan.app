@@ -8,6 +8,8 @@ import androidx.lifecycle.viewModelScope
 import cn.apixiaoyuan.app.core.exercise.ExerciseRepository
 import cn.apixiaoyuan.app.core.model.ExamData
 import cn.apixiaoyuan.app.core.model.ExamQuestion
+import cn.apixiaoyuan.app.core.pk.PkCurTrueAnswer
+import cn.apixiaoyuan.app.core.pk.PkPoint
 import cn.apixiaoyuan.app.core.oldsimian.OldSimianPrefs
 import cn.apixiaoyuan.app.core.oldsimian.OralStrokes
 import kotlinx.coroutines.launch
@@ -232,6 +234,19 @@ class ExamViewModel : ViewModel() {
             } else {
                 q.script
             }
+            // ★ 服务端「回放笔迹」判卷：必须带 curTrueAnswer，且其 pathPoints
+            //   与顶层 script **同源**（2026-09-28 pk-node 实测：不带 → correctCnt=0）。
+            //   答对的题才生成笔迹；答错/空答没有可信笔迹，留 null（服务端按 status 处理）。
+            val curTrueAnswer = if (script != null && correct) {
+                PkCurTrueAnswer(
+                    recognizeResult = userAnswer,
+                    pathPoints = toPkPoints(script),
+                    answer = 1,
+                    showReductionFraction = 0,
+                )
+            } else {
+                null
+            }
 
             totalCost += cost
             if (status == ExamQuestion.STATUS_RIGHT) correctCount++
@@ -241,6 +256,7 @@ class ExamViewModel : ViewModel() {
                 status = status,
                 costTime = cost,
                 script = script,
+                curTrueAnswer = curTrueAnswer,
             )
         }
 
@@ -250,6 +266,51 @@ class ExamViewModel : ViewModel() {
             costTime = totalCost,
         )
     }
+}
+
+/**
+ * 把笔迹 JSON（`[[{"x":..,"y":..},...]]`）解析回点集。
+ *
+ * 是 [OralStrokes.scriptJson]（点集→JSON）的逆操作，**不引入新依赖**：
+ * 字符串由本工程自己产出，只含数字、`{}[]",` 与固定键名 `x`/`y`，
+ * 所以「逐个 `{` 抓 x/y 数值」即可，无需 JSON 库。
+ *
+ * 目的：让 `curTrueAnswer.pathPoints` 与顶层 `script` **严格同源** ——
+ * 服务端回放这两处，不一致会判错（pk-node 实测）。
+ */
+private fun toPkPoints(scriptJson: String): List<List<PkPoint>> {
+    val out = ArrayList<List<PkPoint>>()
+    var stroke = ArrayList<PkPoint>()
+    var i = 0
+    while (i < scriptJson.length) {
+        when (scriptJson[i]) {
+            '[' -> {
+                stroke = ArrayList()
+                out.add(stroke)
+            }
+            '{' -> {
+                val end = scriptJson.indexOf('}', i)
+                if (end < 0) break
+                val body = scriptJson.substring(i + 1, end)
+                var x = 0f
+                var y = 0f
+                for (pair in body.split(',')) {
+                    val kv = pair.split(':')
+                    if (kv.size != 2) continue
+                    val key = kv[0].trim().trim('"')
+                    val v = kv[1].trim().toFloatOrNull() ?: continue
+                    when (key) {
+                        "x" -> x = v
+                        "y" -> y = v
+                    }
+                }
+                stroke.add(PkPoint(x, y))
+                i = end
+            }
+        }
+        i++
+    }
+    return out
 }
 
 /** 作答标记：答对。与 [ExamScreen] 的 `RIGHT_MARK` 同值。 */

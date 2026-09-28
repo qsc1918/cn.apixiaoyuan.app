@@ -318,9 +318,17 @@ object OralStrokes {
         return listOf(pts)
     }
 
-    /** 把 PK 弧线笔迹点集序列化成 `[[{"x":..,"y":..},...]]` 的 JSON 字符串。 */
-    fun pkArcScript(answer: String, seed: Int): String? {
-        val strokes = pkArcPathPoints(answer, seed) ?: return null
+    /**
+     * 把**任意**笔迹点集序列化成 `[[{"x":..,"y":..},...]]` 的 JSON 字符串。
+     *
+     * 与 [pkArcScript] 共用同一份序列化规则（4 位小数、整数省略小数点）。
+     * 练习链路（`ExamViewModel`）用它把同一份点集**同时**写进 `script` 与
+     * `curTrueAnswer.pathPoints` —— pk-node 实测这两个字段必须**同源**，
+     * 服务端靠回放笔迹判卷。
+     *
+     * @param strokes 一笔一个点数组，点用 (x, y) 表示
+     */
+    fun scriptJson(strokes: List<List<Pair<Float, Float>>>): String {
         return buildString {
             append('[')
             strokes.forEachIndexed { si, stroke ->
@@ -335,6 +343,12 @@ object OralStrokes {
             }
             append(']')
         }
+    }
+
+    /** 把 PK 弧线笔迹点集序列化（弧线模板 + [scriptJson]；非 `>`/`<` 返回 null）。 */
+    fun pkArcScript(answer: String, seed: Int): String? {
+        val strokes = pkArcPathPoints(answer, seed) ?: return null
+        return scriptJson(strokes)
     }
 
     /** 四舍五入到 4 位小数（与 pk_arc.py 的 `round(x,4)` 对齐）。 */

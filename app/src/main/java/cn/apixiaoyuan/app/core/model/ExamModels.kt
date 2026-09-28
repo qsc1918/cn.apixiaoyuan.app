@@ -1,5 +1,6 @@
 package cn.apixiaoyuan.app.core.model
 
+import cn.apixiaoyuan.app.core.pk.PkCurTrueAnswer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -99,6 +100,23 @@ data class ExamQuestion(
     @SerialName("ruleType") val ruleType: Int = 0,
     @SerialName("lessonId") val lessonId: Long? = null,
     @SerialName("errorId") val errorId: Long? = null,
+    /**
+     * 服务端回放笔迹所需的「真实答案」块（`curTrueAnswer`）。
+     *
+     * ## ★ 为什么练习提交必须带它（2026-09-28，pk-node 实测）
+     *
+     * 只填 `userAnswer` + `status:1` 提交 → HTTP 200 但服务端判 **`correctCnt=0`**
+     * （**不认**客户端自报的 `status`）。补上 `script`（笔迹点集）+ `curTrueAnswer`
+     * 之后 → 判 **10/10，经验 +20**。
+     *
+     * ⇒ 服务端是「**回放笔迹 + 识别**」判卷。字段结构与 PK 侧完全一致，
+     * 故直接复用 [PkCurTrueAnswer]（`recognizeResult` / `pathPoints` /
+     * `answer` / `showReductionFraction`），**不要另建同构类**。
+     *
+     * 约束：`pathPoints` 必须与顶层 [script] **同源**（同一份点集），
+     * 由 [OralStrokes.scriptJson] 一次生成、两处写。
+     */
+    @SerialName("curTrueAnswer") val curTrueAnswer: PkCurTrueAnswer? = null,
 ) {
     /** 标准答案：原版取 `answers.first()`。 */
     val rightAnswer: String?

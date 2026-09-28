@@ -5,7 +5,6 @@ import cn.apixiaoyuan.app.core.network.BASE_LEO
 import cn.apixiaoyuan.app.core.network.BaseUrl
 import cn.apixiaoyuan.app.core.network.CheckNothing
 import cn.apixiaoyuan.app.core.network.GsonConverter
-import cn.apixiaoyuan.app.core.network.NeedEncode
 import cn.apixiaoyuan.app.core.network.NotNullAndValid
 import retrofit2.http.Body
 import retrofit2.http.Field
@@ -35,9 +34,9 @@ import retrofit2.http.Path
  * 关键实现点（均逐行确证）：
  *  - `getExamInfo` 是 **FormUrlEncoded + POST**，两个 `@Field`：
  *    `keypointId` / `limit`（都是 String，不是 Int）。返回 `ExamVO`。
- *  - `uploadExamResult` 的 body 带 **`@NeedEncode`** —— 请求体需
- *    `libRequestEncoder.so` 编码后发出。本工程 [NeedEncodeInterceptor]
- *    已挂恒等实现挡着，native 接入后自动生效。
+ *  - `uploadExamResult` 走**旧路径** `PUT /leo-math/android/exams/{examId}`、
+ *    **JSON 明文不编码**（2026-09-28 按 pk-node 实测修正；`/v2/` + 编码
+ *    会 400）。这一点与 PK 提交（必须编码）相反，勿互相套用。
  *  - `uploadExamResubmitResult` 比 `uploadExamResult` 多一个
  *    Query `syncData: Int`，是「重做错题」链路，两者同路径同方法。
  */
@@ -69,10 +68,10 @@ interface LeoOralApiService {
      *
      * PUT `/leo-math/android/exams/v2/{examId}`。
      *
-     * **body 带 `@NeedEncode`** —— 请求体在发出前需 native 编码。
-     * 提交前必须本地填好每题的：
+     * **JSON 明文，不编码**（旧路径，无 `/v2/`）。提交前必须本地填好每题的：
      *  - `userAnswer` —— 用户作答
      *  - `script` —— 笔迹 JSON
+     *  - `curTrueAnswer` —— 服务端回放判卷所必需（缺了服务端判 correctCnt=0）
      *  - `status` —— 1 对 / -1 错
      *  - `costTime` —— 每题耗时，**下限 5ms**（真机实测）
      *
@@ -83,8 +82,7 @@ interface LeoOralApiService {
     @BaseUrl(BASE_LEO)
     @GsonConverter
     @NotNullAndValid
-    @NeedEncode
-    @PUT("/leo-math/android/exams/v2/{examId}")
+    @PUT("/leo-math/android/exams/{examId}")
     suspend fun uploadExamResult(
         @Path("examId") examId: String,
         @Body body: ExamData,
