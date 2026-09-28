@@ -1,6 +1,5 @@
 package cn.apixiaoyuan.app.feature.exercise
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -327,10 +326,10 @@ private fun KeypointPickRow(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    // 交互式卡片：官方文档 Card 属性表里 `onClick` 存在（onClick/onLongPress 属交互式）。
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
         colors = CardDefaults.defaultColors(
             color = if (selected) {
                 MiuixTheme.colorScheme.primaryContainer
@@ -386,7 +385,6 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
 
 /** 数字输入行（提交即回写）。 */
 @Composable
-@Suppress("UNUSED_PARAMETER")
 private fun NumberField(
     label: String,
     value: String,
@@ -410,6 +408,8 @@ private fun NumberField(
             },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
+            // enabled 官方文档确认存在（TextField 属性表）。
+            enabled = enabled,
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
             ),
