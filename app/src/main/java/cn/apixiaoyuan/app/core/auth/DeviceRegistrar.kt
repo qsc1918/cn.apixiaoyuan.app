@@ -3,6 +3,7 @@ package cn.apixiaoyuan.app.core.auth
 import android.os.Build
 import android.util.Log
 import cn.apixiaoyuan.app.core.network.ServiceLocator
+import cn.apixiaoyuan.app.core.session.DeviceChainPool
 import cn.apixiaoyuan.app.core.session.SessionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -62,8 +63,56 @@ object DeviceRegistrar {
      * @return true 表示「已具备设备链」（本来就有，或本次注册成功）
      */
     suspend fun ensureRegistered(): Boolean {
-        if (SessionStore.cookie("ks_deviceid") != null) return true
-        return registerDevice()
+        // 已有设备链：直接用（同时顺手沉淀进池）。
+        if (SessionStore.cookie("ks_deviceid") != null) {
+            persistToPool("当前会话")
+            return true
+        }
+        // 没有 → 先试设备注册（官方通道）。
+        if (registerDevice()) {
+            persistToPool("设备注册")
+            return true
+        }
+        // 注册失败（可能被风控/网络）→ 从池里取一份套上。
+        // 对齐 pk-node 的 applyDeviceChain：池空则回退「从已有账号借」。
+        return applyFromPool()
+    }
+
+    /**
+     * 把当前会话里的设备链沉淀进池（幂等，按 `ks_deviceid` 去重）。
+     *
+     * 对齐 pk-node「登录自动补链 + 自动入池」：注册/登录拿到的链不沉淀下来，
+     * 下次还得再注册一次，且池永远是空的。
+     */
+    private fun persistToPool(label: String) {
+        runCatching {
+            val cookies = SessionStore.loadCookies()
+            if (cookies.any { it.name == "ks_deviceid" && it.value.isNotBlank() }) {
+                DeviceChainPool.upsert(label = label, cookies = cookies)
+            }
+        }.onFailure { Log.w(TAG, "设备链入池失败：${it.message}") }
+    }
+
+    /**
+     * 从设备链池取一份套用到当前会话。
+     *
+     * @return true 表示成功补上（会话里已有 `ks_deviceid`）。
+     */
+    private fun applyFromPool(): Boolean {
+        return runCatching {
+            val current = SessionStore.loadCookies()
+            val res = DeviceChainPool.applyToIfMissing(current)
+            if (!res.applied) {
+                Log.w(TAG, "设备链池补链失败：${res.from}")
+                return@runCatching false
+            }
+            SessionStore.saveCookies(res.cookies)
+            Log.i(TAG, "已从设备链池补链：${res.from}")
+            true
+        }.getOrElse {
+            Log.w(TAG, "设备链池补链异常：${it.message}")
+            false
+        }
     }
 
     /**

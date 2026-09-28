@@ -18,6 +18,7 @@ import cn.apixiaoyuan.app.core.log.CrashCatcher
 import cn.apixiaoyuan.app.core.native.NativeDecodeInstaller
 import cn.apixiaoyuan.app.core.native.NativeEncodeInstaller
 import cn.apixiaoyuan.app.core.oldsimian.OldSimianPrefs
+import cn.apixiaoyuan.app.core.session.DeviceChainPool
 import cn.apixiaoyuan.app.core.session.SessionStore
 import cn.apixiaoyuan.app.core.totp.TotpGate
 
@@ -68,6 +69,9 @@ class App : Application() {
         // 会话存储：必须在 RetrofitFactory.init 之前，因为 init 会立即
         // 取用 SessionStore.snapshot() 作为 sessionProvider 的闭包。
         SessionStore.init(this)
+        // 设备链池：与 SessionStore 同为 SharedPreferences 存储，同样要先 init。
+        // 放在这里（而非懒加载）是因为「导入 cookie 自动入池」在 UI 早期就可能触发。
+        DeviceChainPool.init(this)
 
         // 设备指纹：YFD_U 的取值来源（`Lds/i3` 链路复刻）。
         // 登录/发码接口都用它作设备级频控键，必须在任何登录动作之前就绪。

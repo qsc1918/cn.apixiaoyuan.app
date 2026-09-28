@@ -184,6 +184,12 @@ object SessionStore {
             )
         }
         saveCookies(merged.values.toList())
+        // ★ 含设备链就自动入池（2026-09-28，对齐 pk-node「导入即入池」）——
+        //   导入是从原版/别处取设备链的主通道，不沉淀下来就白导了。
+        val list = merged.values.toList()
+        if (list.any { it.name.startsWith(DEVICE_CHAIN_PREFIX) }) {
+            DeviceChainPool.upsert(label = "导入", cookies = list)
+        }
         return parsed.size
     }
 
