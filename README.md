@@ -90,6 +90,19 @@ exit 0 且零 `e:` 行才算过。
 
 版本号由 `version.properties` 维护。CI 不改版本号，只有 release 工作流发布时 `+1`。
 
+## 交流与反馈
+
+| 渠道 | 地址 |
+|---|---|
+| **GitHub**（问题反馈 / PR） | https://github.com/sxd91/cn.apixiaoyuan.app |
+| **QQ 一群** | `994173459` |
+| **QQ 二群** | `1109588491` |
+
+> 仓库 README 里的群号无法点击复制，请手动复制；**应用内**「设置 → 关于」
+> 里的群号支持**点击即复制**。
+
+如发现侵权内容，请优先通过 GitHub Issues 告知，核实后立即删除。
+
 ## 协议
 
 MIT，见 [LICENSE](LICENSE)。
