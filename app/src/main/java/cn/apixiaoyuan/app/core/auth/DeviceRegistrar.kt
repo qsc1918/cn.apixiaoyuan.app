@@ -13,10 +13,18 @@ import org.json.JSONObject
  *
  * ## 背景（2026-09-27 逆向闭环）
  *
- * 主域业务端点（`/leo-profile/android/user-infos/batchGet`、
- * `/leo-gateway/android/accounts/switch` 等）需要**两层设备链** `sid` + `ks_*`：
- *  - 缺 `ks_*` → 401 `x-block-by: leo-auth`（认证层挡）
- *  - 有 `ks_*` → 417 `x-block-by: solar-encoder`（认证已过，卡传输/编码层，App 内可过）
+ * 主域业务端点对设备链 `ks_*` 的需求**因端点而异**（2026-09-28 按 pk-node 实测修正）：
+ *
+ *  - **仅认证层要求**（`/leo-profile/.../batchGet` 等）：缺 `ks_*` → 401
+ *    `x-block-by: leo-auth`；补上即可进业务层。
+ *  - **PK 出题硬要求**（`/leo-game-pk/.../match`）：**缺 `ks_*` 恒 400**；
+ *    带上才能正常出题。`ks_deviceid` 是**设备级**（非账号级），可跨账号移植。
+ *  - **`/leo-gateway/android/accounts/switch` 不需要 `ks_*`**（pk-node v1.4.0 实测：
+ *    只要 satisfy 三条件即可 200 `code:1`，全程未带设备链）。
+ *
+ * ⚠️ **旧结论已作废**：此前写「有 `ks_*` 仍卡 417 = 传输/编码层」—— **错的**。
+ * 417 的真因是 **sign 缺失/过期** 或 **主域协议版本不对**（须 `version=3.140.1`
+ * + `platform=android37`），与 TLS/传输层无关（pk-node 纯 Node HTTP 即可 200）。
  *
  * 本项目登录只拿到 `sid`，`ks_*` 需要先调设备注册接口，由响应的 `Set-Cookie`
  * 下发（`PersistentCookieJar` 自动落盘）。这正是原版 `v0$b.run()` 干的事。

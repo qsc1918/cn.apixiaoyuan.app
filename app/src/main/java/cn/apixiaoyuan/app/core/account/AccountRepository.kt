@@ -188,12 +188,28 @@ object AccountRepository {
      * @return 切换成功返回新的 userid；失败抛异常（含非 1 业务码）。
      */
     suspend fun switchTo(item: SubAccountItem): Long {
-        // 切换走主域 `/leo-gateway/android/accounts/switch`，需要设备链 sid + ks_*。
-        // 本项目登录只拿 sid，ks_* 必须先调设备注册接口拿（否则 401 leo-auth）。
-        // 幂等：已有 ks_deviceid 时直接返回 true，不重复注册。
+        // 切换走主域 `/leo-gateway/android/accounts/switch`。
+        //
+        // ★ pk-node v1.4.0 实测：**switch 不需要设备链 `ks_*`**，只需三条件：
+        //     ① `_productId` 放查询串最前；② 带 `sign`；③ 主域参数 version=3.140.1
+        //     + platform=android37。三条件现在均已满足（2026-09-28）。
+        //
+        // 这里仍保留一次幂等的设备注册调用（结果忽略）：`ks_*` 是 **PK 出题** 与
+        // `batchGet` 等端点需要的，先备着可减少后续请求的 401；已有则不重复注册。
         DeviceRegistrar.ensureRegistered()
         val resp = ServiceLocator.subAccount.switchAccount(item.userId)
-        check(resp.isSuccess) { "切换失败（code=${resp.code}）" }
+        // 失败时把「诊断三要素」一并抛出，便于真机定位：
+        //   1) 业务码 code；2) sign 是否就绪（缺 sign → 417）；
+        //   3) 提示主域协议版本（错了也 417/400）。
+        check(resp.isSuccess) {
+            val signState = if (cn.apixiaoyuan.app.core.sign.SignComputer.isReady) {
+                "sign=ready"
+            } else {
+                "sign=NOT_READY（417 常见根因）"
+            }
+            "切换失败（code=${resp.code}, $signState, " +
+                "protocolVersion=${cn.apixiaoyuan.app.core.network.NetworkConfig.LEO_PROTOCOL_VERSION}）"
+        }
         val newId = resp.body?.ytkUserId?.takeIf { it > 0 } ?: item.userId
         SessionStore.saveYfdU(newId.toLong())
         val domain = SessionStore.loadCookies()
