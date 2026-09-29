@@ -70,6 +70,36 @@ object SessionStore {
         stateRevision++
     }
 
+    /**
+     * 解密后的 cookie 列表**内存缓存**。
+     *
+     * ## 为什么需要（2026-09-29 掉帧真因）
+     *
+     * [loadCookies] 的工作量不轻：读 SharedPreferences 字符串 → JSON 解析 →
+     * 对每条 `ks_*` 走 **Android Keystore** 做 AES-GCM 解密。Keystore 是
+     * 系统服务，每次调用都是跨进程 IPC（毫秒级）。
+     *
+     * 而它此前被**在 Compose 组合期间反复调用**：
+     *  - `HomeScreen.SessionCard` 一次组合里调 3 次（`isLoggedIn` → `cookie("userid")`、
+     *    `yfdU`、显式取值各一次）；
+     *  - `HomeScreen.SubAccountsSection` 每帧再调一次；
+     *  - `AccountScreen` 设备链池对每条链的 `decodeCookies()` 也在组合里。
+     *
+     * 表现为「账号列表一加载出来，界面就一卡一卡」—— 每次重组都在主线程做
+     * 几十次 Keystore IPC，直接掉帧。
+     *
+     * ## 缓存策略
+     *
+     * **写时失效**：所有写入路径（[saveCookies] / [clear]）都会重置本缓存。
+     * 由于本项目所有 cookie 写入都收口在 [saveCookies]（`PersistentCookieJar`
+     * 落盘、[importCookieHeader]、[upsertCookie]、设备链补链都走它），
+     * 因此缓存不会与磁盘不一致。
+     *
+     * 缓存的是**明文**列表（[loadCookies] 的返回形态），不是落盘密文。
+     */
+    @Volatile
+    private var cachedCookies: List<CookieEntry>? = null
+
     fun init(context: Context) {
         appContext = context.applicationContext
     }
@@ -107,6 +137,11 @@ object SessionStore {
     fun saveCookies(cookies: List<CookieEntry>) {
         val toStore = cookies.map { it.encryptedForStorage() }
         prefs().edit().putString(KEY_COOKIES, json.encodeToString(toStore)).apply()
+        // 缓存失效必须在写盘之后、bump 之前：bump 会让 UI 立刻重组并
+        // 读 loadCookies()，若此时缓存还指向旧值就会闪一帧旧数据。
+        // 存的是「loadCookies() 会返回的形态」（对落盘形态解回来），
+        // 这样即便调用方传入的 value 已是密文（幂等场景）也不会缓存错。
+        cachedCookies = toStore.map { it.decryptedFromStorage() }
         // sid 或 userid 存在即视为有登录态（userid 不加密，直接读原值）
         cookies.firstOrNull { it.name == "userid" }?.value?.toLongOrNull()?.let {
             prefs().edit().putLong(KEY_YFD_U, it).apply()
@@ -122,6 +157,15 @@ object SessionStore {
      * 避免解析成功却被判为未登录。
      */
     fun saveYfdU(value: Long) {
+        // 幂等：值没变就不写、也不 bump。
+        //
+        // ## 为什么必须幂等（2026-09-29 掉帧/自激真因）
+        //
+        // [bump] 会让 [stateRevision] 变化，而 `HomeViewModel` 监听它 → 重拉
+        // 子账号列表；重拉过程又会回写 YFD_U / 昵称 / 年级 —— 若这里无条件
+        // bump，就形成「刷新 → 回写 → bump → 再刷新」的**自激循环**，
+        // 表现为主页周期性卡顿。值相同即无事发生，天然断环。
+        if (yfdU == value) return
         prefs().edit().putLong(KEY_YFD_U, value).apply()
         bump()
     }
@@ -201,10 +245,18 @@ object SessionStore {
      * 所以不需要额外的迁移步骤。
      */
     fun loadCookies(): List<CookieEntry> {
-        val raw = prefs().getString(KEY_COOKIES, null) ?: return emptyList()
+        // 命中缓存直接返回 —— 避免每次重组都重做「JSON 解析 + N 次 Keystore 解密」。
+        cachedCookies?.let { return it }
+        val raw = prefs().getString(KEY_COOKIES, null)
+        if (raw == null) {
+            cachedCookies = emptyList()
+            return emptyList()
+        }
         val list = runCatching { json.decodeFromString<List<CookieEntry>>(raw) }
             .getOrDefault(emptyList())
-        return list.map { it.decryptedFromStorage() }
+        val decrypted = list.map { it.decryptedFromStorage() }
+        cachedCookies = decrypted
+        return decrypted
     }
 
     /** 取某个 cookie 的值，没有返回 null。 */
@@ -302,6 +354,9 @@ object SessionStore {
 
     /** 保存年级 ID（登录 / 拉到 UserVO 后调用）。 */
     fun saveGrade(grade: Int) {
+        // 幂等：值没变就不写（不 bump —— saveGrade 本来也不 bump，
+        // 但省掉一次无意义的 SharedPreferences 写）。
+        if (this.grade() == grade) return
         prefs().edit().putInt(KEY_GRADE, grade).apply()
     }
 
@@ -320,6 +375,16 @@ object SessionStore {
 
     /** 回填当前用户昵称 / 头像（拉到 UserVO 后调用）。 */
     fun saveCurrentUserInfo(nickname: String?, avatarUrl: String?) {
+        // ★ 幂等守卫 —— 这是「主页一卡一卡」的直接元凶（2026-09-29）。
+        //
+        // [bump] 会触发 `HomeViewModel` 重拉子账号列表（它监听 stateRevision），
+        // 而重拉链路（`fetchSubAccounts` → `refreshCurrentUserProfile` 以及
+        // 标 `isCurrent` 那一步）**每次都会无条件调用本方法**。于是形成自激：
+        //
+        //     重拉 → saveCurrentUserInfo → bump → 重拉 → …
+        //
+        // 只要昵称/头像没变就直接返回，环即断开。这是必要的修复，而非优化。
+        if (currentNickname == nickname && currentAvatarUrl == avatarUrl) return
         prefs().edit()
             .putString(KEY_NICKNAME, nickname)
             .putString(KEY_AVATAR, avatarUrl)
@@ -349,6 +414,7 @@ object SessionStore {
     /** 清空登录态（登出）。 */
     fun clear() {
         prefs().edit().clear().apply()
+        cachedCookies = emptyList()
         bump()
     }
 

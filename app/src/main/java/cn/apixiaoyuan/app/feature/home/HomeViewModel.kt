@@ -9,6 +9,7 @@ import cn.apixiaoyuan.app.core.account.AccountRepository
 import cn.apixiaoyuan.app.core.account.SubAccountItem
 import cn.apixiaoyuan.app.core.session.SessionStore
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -68,6 +69,10 @@ class HomeViewModel : ViewModel() {
         viewModelScope.launch {
             snapshotFlow { SessionStore.stateRevision }
                 .drop(1) // 首次值由上面的 refreshAccounts() 消费，跳过
+                // 去抖 250ms：即便上游因竞态连续变化多次，也只重拉一次。
+                // 这是对上面那些「写入幂等」修复的补充保险 —— 单靠幂等已能断环，
+                // 但并发窗口下仍可能瞬间变化两次，去抖避免多余的网络往返。
+                .debounce(250L)
                 .collect { refreshAccounts() }
         }
     }

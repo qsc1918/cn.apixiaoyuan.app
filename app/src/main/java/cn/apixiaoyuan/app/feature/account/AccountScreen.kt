@@ -333,7 +333,12 @@ fun AccountScreen(
             SectionCard(title = "设备链池") {
                 var poolRevision by remember { mutableStateOf(0) }
                 val context = LocalContext.current
-                val pool = remember(poolRevision) { DeviceChainPool.listAll() }
+                // 关键：把「解密 + 数 ks_* 个数」放到 remember 里，只在池变化时算一次。
+                // 此前 `item.decodeCookies().size` 直接写在 Text 表达式里 —— 每次
+                // 重组 × 每条链 × 每个 ks_* 值都要走一次 Keystore 解密，界面必然卡。
+                val pool = remember(poolRevision) {
+                    DeviceChainPool.listAll().map { it to it.decodeCookies().size }
+                }
                 Text(
                     text = "池内 ${pool.size} 份（启用 ${pool.count { it.enabled }}）· " +
                         "轮换时会随机挑一份启用中的链。",
@@ -345,7 +350,7 @@ fun AccountScreen(
                         color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                     )
                 } else {
-                    pool.forEach { item ->
+                    pool.forEach { (item, ksCount) ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -361,7 +366,7 @@ fun AccountScreen(
                                 Text(
                                     text = "deviceId ${item.deviceId ?: "未知"} · " +
                                         (if (item.enabled) "启用中" else "已停用") +
-                                        " · ${item.decodeCookies().size} 项 ks_*",
+                                        " · ${ksCount} 项 ks_*",
                                     color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                                 )
                             }

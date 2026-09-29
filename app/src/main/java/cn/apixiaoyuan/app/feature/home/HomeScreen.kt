@@ -152,6 +152,11 @@ private data class QuickEntry(
  */
 @Composable
 private fun SessionCard(onClick: () -> Unit) {
+    // 读会话版本戳：它变化（登录 / 登出 / 切号 / 导入 / 补链）时本卡重组。
+    // 不读它的话，登录后返回主页这张卡不会刷新（下面几个 getter 都不是
+    // Compose 可观察的）。读的是 stateRevision 而非 loadCookies() 的结果，
+    // 所以不会因为「值没变」而漏更新。
+    SessionStore.stateRevision
     val loggedIn = SessionStore.isLoggedIn
     val yfdU = SessionStore.yfdU
     val cookieCount = SessionStore.loadCookies().size
@@ -227,6 +232,8 @@ private fun SessionCard(onClick: () -> Unit) {
  */
 @Composable
 private fun SubAccountsSection(viewModel: HomeViewModel) {
+    // 同 SessionCard：读版本戳以在登录/登出时重组（isLoggedIn 非可观察）。
+    SessionStore.stateRevision
     if (!SessionStore.isLoggedIn) return
     if (viewModel.loadingAccounts && viewModel.subAccounts.isEmpty()) {
         Row(
