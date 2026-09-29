@@ -122,7 +122,19 @@ fun PkH5Screen(
                 //     → 交给原生解析 URL（带 sign）
                 //     → 否则自己把 {client} 替换成 "api" 发出去（必然 417）
                 // 所以这个版本号是「H5 能否正确拿到登录态数据」的开关，别删。
-                userAgentString = "$userAgentString YuanSouTiKouSuan/${BuildConfig.VERSION_NAME}"
+                //
+                // ⚠️ 版本必须是**纯净的 `x.y.z`**（2026-09-29 实测）。
+                // H5 用严格正则从 UA 取版本：
+                //   /\s+(...|YuanSouTiKouSuan|...)\/(\d+\.\d+\.\d+)(\s+|$)/i
+                // 尾部要求「数字.数字.数字」后跟空白或结束 —— 带后缀（如
+                // `3.141.1-abc1234`）会**整体匹配失败并返回空串**，H5 于是发出
+                // `...?version=`（空）→ 417「获取banner数据失败」。
+                //
+                // root cause 已在 build.gradle.kts 去掉 versionNameSuffix；
+                // 这里再 `substringBefore('-')` 兜一道，防止将来又被加回后缀。
+                val uaVersion = BuildConfig.VERSION_NAME.substringBefore('-')
+                userAgentString = "$userAgentString YuanSouTiKouSuan/$uaVersion"
+                cn.apixiaoyuan.app.core.log.AppLogger.i("PkH5", "WebView UA = $userAgentString")
             }
 
             // 原生桥。H5 按**方法前缀**选对象名，前缀与方法名分开：

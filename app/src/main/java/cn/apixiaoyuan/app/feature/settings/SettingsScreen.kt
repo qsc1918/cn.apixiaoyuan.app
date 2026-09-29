@@ -248,12 +248,14 @@ fun SettingsScreen(navController: AppNavController) {
                 //
                 // 此前 description 写的是 "cn.apixiaoyuan.app"（包名），
                 // 用户看到的就是「版本：包名」，明显是错的。
-                // release 构建的 versionName 形如 `3.141.1-<gitShortHash>`
-                // （见 app/build.gradle.kts 的 versionNameSuffix），
-                // 所以这里显示的是「版本名 + 构建哈希」，能直接对上 CI 产物。
+                //
+                // ⚠️ release 的 versionName 已**不再带** `-<gitHash>` 后缀
+                // （2026-09-29）：那会让 PK 的 H5 从 UA 里解析版本失配
+                // （正则要求纯净 x.y.z）→ `?version=` 为空 → 417。
+                // 构建哈希改用独立的 BuildConfig.GIT_HASH 展示。
                 SettingRow(
                     title = "版本",
-                    description = "${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）",
+                    description = "${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）· ${BuildConfig.GIT_HASH}",
                 )
                 // QQ 交流群：点一行复制对应群号。
                 QQ_GROUPS.forEach { (label, number) ->

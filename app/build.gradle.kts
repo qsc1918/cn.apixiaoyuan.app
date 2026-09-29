@@ -74,7 +74,34 @@ android {
                 "proguard-rules.pro"
             )
             signingConfig = signingConfigs.findByName("release") ?: getByName("debug").signingConfig
-            versionNameSuffix = runCatching { "-${gitShortHash()}" }.getOrNull() ?: ""
+            // ⚠️⚠️ **绝对不要给 versionName 加后缀**（如 `-<gitHash>`）。
+            //
+            // ## 为什么（2026-09-29 用户实测 417 的根因）
+            //
+            // PK 的 H5（`leo-web-oral-pk/assets/core-base-legacy.js`）从 **UA**
+            // 里按严格正则取 App 版本，再拼进请求 query：
+            //
+            //     getAppVersion = function () {
+            //       var t = ua.match(/\s+(YuanTiKu|YuanFuDao|YuanSouTi|YuanSouTiKouSuan|...)\/(\d+\.\d+\.\d+)(\s+|$)/i);
+            //       return t ? t[2] : "";
+            //     }
+            //
+            // 正则尾部要求 `数字.数字.数字` 后跟**空白或结束**。带后缀的
+            // `YuanSouTiKouSuan/3.141.1-3c27687` **匹配失败 → 返回空串**，
+            // 于是 H5 发出 `//xyst.yuanfudao.com/solar-activity/api/activity/6?version=`
+            // （version 为空）→ 服务端 417「获取banner数据失败」。
+            //
+            // 实测对照（同一 UA 模板）：
+            //   YuanSouTiKouSuan/3.141.1            → 匹配，v=3.141.1   ✅
+            //   YuanSouTiKouSuan/3.141.1-3c27687    → 不匹配，v=""      ❌
+            //
+            // 版本名必须保持**纯净的 x.y.z**。构建哈希改用独立 buildConfigField
+            // 暴露（见下方 GIT_HASH），不污染 versionName。
+            buildConfigField(
+                "String",
+                "GIT_HASH",
+                "\"${runCatching { gitShortHash() }.getOrDefault("unknown")}\"",
+            )
         }
         debug {
             applicationIdSuffix = ".debug"
