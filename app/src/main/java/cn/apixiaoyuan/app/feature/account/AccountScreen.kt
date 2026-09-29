@@ -340,7 +340,7 @@ fun AccountScreen(
                     DeviceChainPool.listAll().map { it to it.decodeCookies().size }
                 }
                 Text(
-                    text = "池内 ${pool.size} 份（启用 ${pool.count { it.enabled }}）· " +
+                    text = "池内 ${pool.size} 份（启用 ${pool.count { it.first.enabled }}）· " +
                         "轮换时会随机挑一份启用中的链。",
                     color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                 )
