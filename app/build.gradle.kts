@@ -51,6 +51,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         buildConfigField("long", "BUILD_TIMESTAMP", "${System.currentTimeMillis()}L")
+        // ★ 2026-09-30 修复 CI：`GIT_HASH` 原先只配在 `release {}` 里 → debug 变体
+        //   （`lintDebug` / `compileDebugKotlin`）编译不到 → CI 红：
+        //     e: SettingsScreen.kt:258 Unresolved reference 'GIT_HASH'
+        //   移到 defaultConfig：release / debug 两种变体都有。
+        //
+        //   它只用于「设置页展示构建哈希」，**不污染 versionName**
+        //   （versionName 必须保持纯净 x.y.z，见下方 release 块的说明）。
+        buildConfigField(
+            "String",
+            "GIT_HASH",
+            "\"${runCatching { gitShortHash() }.getOrDefault("unknown")}\"",
+        )
         // native 只做 arm64-v8a：内置的 libRequestEncoder.so / libc++_shared.so 均为 arm64。
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
@@ -95,13 +107,8 @@ android {
             //   YuanSouTiKouSuan/3.141.1            → 匹配，v=3.141.1   ✅
             //   YuanSouTiKouSuan/3.141.1-3c27687    → 不匹配，v=""      ❌
             //
-            // 版本名必须保持**纯净的 x.y.z**。构建哈希改用独立 buildConfigField
-            // 暴露（见下方 GIT_HASH），不污染 versionName。
-            buildConfigField(
-                "String",
-                "GIT_HASH",
-                "\"${runCatching { gitShortHash() }.getOrDefault("unknown")}\"",
-            )
+            // 版本名必须保持**纯净的 x.y.z**。构建哈希由 defaultConfig 里的
+            // GIT_HASH buildConfigField 提供（不污染 versionName）。
         }
         debug {
             applicationIdSuffix = ".debug"

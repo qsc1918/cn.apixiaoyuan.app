@@ -149,8 +149,36 @@ internal object PkH5Proxy {
      * 只拦主域 + 常规方法 + `http(s)`；其余（`data:` / `blob:` / 第三方域）返回 false。
      */
     fun shouldProxy(method: String, url: String): Boolean {
-        if (!url.startsWith("https://$LEO_HOST/") && !url.startsWith("http://$LEO_HOST/")) return false
-        return method.equals("GET", true) || method.equals("POST", true) || method.equals("PUT", true)
+        if (!(method.equals("GET", true) || method.equals("POST", true) || method.equals("PUT", true))) {
+            return false
+        }
+        val u = url.lowercase()
+        if (!u.startsWith("http://") && !u.startsWith("https://")) return false
+        // ★★ 2026-09-30：从「只拦主域」改为**通配自有域**（对齐 pk-node 的 isAllowedHost）。
+        //
+        // ## 为什么（用户报「PK 页面没有登录态」的根因之一）
+        //
+        // 原先只拦 `xyks.yuanfudao.com`。但 PK H5 会打**多个**业务域：
+        //   - `ape-api.yuanfudao.com`   → 账号/登录态（`/accounts/api/current`）
+        //   - `xyst.yuanfudao.com`      → banner / 配置中心
+        //   - `leo-homework`            → PK 榜
+        //   - `leo-activity`            → 道具 / 背包
+        //   - `leo-alchemy-account`     → 好友 / 头像挂件
+        //   - `leo-star`                → 胜率 / 任务
+        //   - `leo-reward`              → 积分兑换
+        //
+        // 漏一个域 → 该请求**既不带 cookie、也不补 sign / 公共参数** →
+        // 服务端 401/417 → H5 判定「未登录」／页面「渲染出来但内容空白」。
+        //
+        // pk-node 侧（8392b1a 前后）早已改成通配 `*.yuanfudao.com`，
+        // 本类之前没同步 —— 这是「web 端好了、老挂不行」的直接原因。
+        //
+        // 安全性：只放行自有域（yuanfudao.com / .biz 测试域），
+        // 且 host 由 WebView 给出，H5 脚本无法借它访问任意第三方。
+        val host = runCatching { java.net.URI(url).host ?: "" }.getOrDefault("")
+        if (host.isEmpty()) return false
+        return host.endsWith(".yuanfudao.com") || host == "yuanfudao.com" ||
+            host.endsWith(".yuanfudao.biz") || host == "yuanfudao.biz"
     }
 
     /**
@@ -227,6 +255,20 @@ internal object PkH5Proxy {
      */
     private fun withSignAndCommonQuery(url: String): String {
         val parsed = url.toHttpUrlOrNull() ?: return url
+        // ★★ 2026-09-30：只有**主域**才补公共参数 / sign / 归正 {client}。
+        //
+        // ## 为什么必须分域（否则修完登录态反而打坏账号接口）
+        //
+        // `shouldProxy` 现在放行全部 `*.yuanfudao.com`，但各域的**参数口径不同**：
+        //   - `xyks.yuanfudao.com`（主域 / PK）：要 `_productId` + `sign` + `{client}` 归正；
+        //   - `ape-api.yuanfudao.com`（账号域）：走的是**另一套**签名与产品号
+        //     （`_productId=241` 之类），塞主域参数会直接把它打挂；
+        //   - `xyst` / `leo-*` 诸域：各有各的公共参数。
+        //
+        // 所以非主域**只借 cookie 原样转发**（这正是它们缺的东西 —— 登录态），
+        // 不做任何 query 改写。
+        if (parsed.host != LEO_HOST) return url
+
         val normalized = normalizeClientSegment(parsed)
         val builder = normalized.newBuilder()
         val isPk = normalized.pathSegments.firstOrNull() == "leo-game-pk"
