@@ -235,6 +235,19 @@ fun PkH5Screen(
                     if (req.isForMainFrame) return null
                     val method = req.method ?: return null
                     val url = req.url?.toString() ?: return null
+                    // ★ 2026-09-30：把「**像业务接口**的子请求」打出来，用于区分
+                    //   「H5 压根没发请求」vs「发了但没进代理」。
+                    //
+                    // ⚠️ 过滤必须收紧，否则会把几十个 js/css/png 全打出来 → 又刷屏。
+                    //   只留：自有域 + 路径以 /leo- 或 /math/ 或 /api/ 开头（业务接口特征）。
+                    val host = runCatching { java.net.URI(url).host ?: "" }.getOrDefault("")
+                    val isOwnHost = host.endsWith("yuanfudao.com") || host.endsWith("yuanfudao.biz")
+                    if (isOwnHost && (url.contains("/leo-") || url.contains("/math/") || url.contains("/api/"))) {
+                        cn.apixiaoyuan.app.core.log.AppLogger.d(
+                            "PkH5Proxy",
+                            "子请求 ${req.method} $url 代理=${PkH5Proxy.shouldProxy(method, url)}",
+                        )
+                    }
                     if (!PkH5Proxy.shouldProxy(method, url)) return null
 
                     val headers = runCatching { req.requestHeaders.orEmpty() }.getOrDefault(emptyMap())

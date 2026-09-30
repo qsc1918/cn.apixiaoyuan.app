@@ -136,7 +136,27 @@ object SessionStore {
      */
     fun saveCookies(cookies: List<CookieEntry>) {
         val toStore = cookies.map { it.encryptedForStorage() }
-        prefs().edit().putString(KEY_COOKIES, json.encodeToString(toStore)).apply()
+        // ★★ 2026-09-30：**幂等守卫** —— 「日志一直刷屏」的真凶就在这一句。
+        //
+        // ## 自激环（铁证：真机日志里 user-info/context/batchGet 每 ~300ms 一轮，永不停）
+        //
+        // `PersistentCookieJar` 在**每个 HTTP 响应**返回时都会调本方法（把响应的
+        // Set-Cookie 合并进来）。而 cookie 绝大多数时候**没有任何变化** ——
+        // 原实现在这种情况下依然 `bump()`，于是：
+        //
+        //     bump() → HomeViewModel 的 snapshotFlow 发射 → refreshAccounts()
+        //           → fetchSubAccounts() → 多个主域请求
+        //           → 每个响应又触发 PersistentCookieJar.saveCookies()
+        //           → bump() → ……（转不停，每轮 ≈ debounce 250ms + 请求耗时）
+        //
+        // 表现就是：① 日志页被 `LeoNet` 刷屏；② 主页/列表一直在重组。
+        //
+        // 修法：**内容与已存的一致就什么都不做**（不写盘、不 bump）。
+        // 判据用「落盘形态的 JSON 字符串」比较 —— 它同时覆盖了 name/value/domain/
+        // path/expires 等全部字段，且与 [loadCookies] 的缓存形态同源，最稳。
+        val encoded = json.encodeToString(toStore)
+        if (prefs().getString(KEY_COOKIES, null) == encoded) return
+        prefs().edit().putString(KEY_COOKIES, encoded).apply()
         // 缓存失效必须在写盘之后、bump 之前：bump 会让 UI 立刻重组并
         // 读 loadCookies()，若此时缓存还指向旧值就会闪一帧旧数据。
         // 存的是「loadCookies() 会返回的形态」（对落盘形态解回来），

@@ -49,6 +49,11 @@ fun AccountStatsScreen(
     navController: AppNavController,
     viewModel: AccountStatsViewModel = viewModel(),
 ) {
+    // ★ 2026-09-30：**进入页面自动拉一次**。
+    //   此前只有按钮里调 refresh()，用户进来看到的是全「—」，误以为「分数没加载/显示 0」。
+    //   ★ 用户手动点按钮仍可再刷（refresh() 内部会取消上一个 Job，连点安全）。
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.refresh() }
+
     AppScrollScaffold(title = "账号分数 / 任务", onBack = { navController.popBackStack() }) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
 
