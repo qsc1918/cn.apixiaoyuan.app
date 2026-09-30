@@ -324,6 +324,30 @@ class PkWebViewBridge(
         )
     }
 
+    /**
+     * 基础信息（`Zt("getBasicInfo", {trigger})`，index-legacy.CHYoHfC0 的 `r("B")`）。
+     *
+     * ★★ 2026-09-30：此前**未实现** —— 桥若没有这个方法，H5 的
+     * `St[g][method]` 直调会 TypeError（最坏整段 JS 抛错），
+     * 即使走 `callNative` 兜底也会 `=> undefined`，调用方 `await` 到 undefined
+     * 后可能提前结束初始化 → 页面停在「一年级 / 0 胜 / 胜率 0%」。
+     *
+     * 契约（逐行读 index-legacy）：`B()` 返回一个 Promise，resolve 出基础信息对象。
+     * H5 只把它当「能力查询」用，字段并未硬依赖，故回空对象即可让它正常 resolve。
+     * 额外带上真实 userId/gradeId，便于 H5 需要时使用。
+     */
+    @JavascriptInterface
+    fun getBasicInfo(payload: String?) {
+        respond(
+            payload,
+            ok(
+                JSONObject()
+                    .put("userId", resolveUserId())
+                    .put("gradeId", SessionStore.grade() ?: 0),
+            ),
+        )
+    }
+
     /** 手写识别。真机走 native OCR；本机没有，回空串交由 H5 判定（视为未识别）。 */
     @JavascriptInterface
     fun recognize(payload: String?) {
@@ -604,6 +628,7 @@ class PkWebViewBridge(
 
         when (method) {
             "getUserInfo" -> getUserInfo(p)
+            "getBasicInfo" -> getBasicInfo(p)
             "getDeviceInfo" -> getDeviceInfo(p)
             "getImmerseStatusBarHeight" -> getImmerseStatusBarHeight(p)
             "requestConfig" -> requestConfig(p)
