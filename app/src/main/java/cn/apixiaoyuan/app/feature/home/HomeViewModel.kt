@@ -56,6 +56,17 @@ class HomeViewModel : ViewModel() {
     /** 是否正在切换账号。 */
     private var switching by mutableStateOf(false)
 
+    /**
+     * 正在切换的**目标账号 userId**（null = 没在切换）。
+     *
+     * ★ 2026-09-30：用户反馈「切换账号没有动画并且还有延迟」。
+     * UI 需要知道「点的是哪一张卡」才能在该卡上转圈 —— 否则点击后
+     * 界面上**看不出任何变化**（没有任何进行中状态），直到列表刷新完成，
+     * 感知上就是「卡住/没反应」。
+     */
+    var switchingUserId by mutableStateOf<Int?>(null)
+        private set
+
     init {
         refreshAccounts()
         // 会话版本戳变化（登录 / 登出 / 切号 / 导入 cookie）→ 重拉列表。
@@ -109,14 +120,18 @@ class HomeViewModel : ViewModel() {
     fun switchTo(item: SubAccountItem) {
         if (switching || item.isCurrent) return
         switching = true
+        switchingUserId = item.userId          // ★ 让对应卡片立刻转圈（即时反馈）
         message = null
         viewModelScope.launch {
             val result = runCatching { AccountRepository.switchTo(item) }
             switching = false
+            switchingUserId = null
             result.onSuccess { newId ->
                 message = "已切换到「${item.nickname}」"
-                // SessionStore.stateRevision 已被 switchTo 里的 saveYfdU/upsertCookie
-                // 自增，init 的观察协程会自动重拉列表；这里不重复刷新。
+                // ★ 2026-09-30：切换成功后**立刻重拉一次**，不等 stateRevision 的 250ms 去抖。
+                //   用户反馈「切换有延迟」—— 那 250ms 去抖 + 一轮网络往返就是延迟来源。
+                //   这里主动刷新，感知上「点完马上更新」。
+                refreshAccounts()
             }.onFailure {
                 message = "切换失败：${it.message ?: it}"
             }

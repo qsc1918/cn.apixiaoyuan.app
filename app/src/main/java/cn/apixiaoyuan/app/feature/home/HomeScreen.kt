@@ -267,7 +267,11 @@ private fun SubAccountsSection(viewModel: HomeViewModel) {
             color = MaterialTheme.colorScheme.onSurface,
         )
         viewModel.subAccounts.forEach { item ->
-            SubAccountCard(item = item, onClick = { viewModel.switchTo(item) })
+            SubAccountCard(
+                item = item,
+                switching = viewModel.switchingUserId == item.userId,
+                onClick = { viewModel.switchTo(item) },
+            )
         }
     }
 
@@ -287,11 +291,11 @@ private fun SubAccountsSection(viewModel: HomeViewModel) {
  * 非当前账号整卡可点（切换）。
  */
 @Composable
-private fun SubAccountCard(item: SubAccountItem, onClick: () -> Unit) {
+private fun SubAccountCard(item: SubAccountItem, switching: Boolean, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = !item.isCurrent, onClick = onClick),
+            .clickable(enabled = !item.isCurrent && !switching, onClick = onClick),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (item.isCurrent) {
@@ -324,7 +328,11 @@ private fun SubAccountCard(item: SubAccountItem, onClick: () -> Unit) {
                     },
                 )
                 Text(
-                    text = if (item.isCurrent) "当前账号" else "uid ${item.userId}",
+                    text = when {
+                        switching -> "正在切换…"
+                        item.isCurrent -> "当前账号"
+                        else -> "uid ${item.userId}"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (item.isCurrent) {
                         MaterialTheme.colorScheme.onPrimaryContainer
@@ -333,7 +341,11 @@ private fun SubAccountCard(item: SubAccountItem, onClick: () -> Unit) {
                     },
                 )
             }
-            if (!item.isCurrent) {
+            // ★ 2026-09-30：点击后**立刻**在该卡上显示进度圈（即时反馈）。
+            //   此前点击后界面毫无变化、等列表刷完才更新 →「没动画 + 有延迟」。
+            if (switching) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else if (!item.isCurrent) {
                 Icon(
                     imageVector = AppIcons.ChevronForward,
                     contentDescription = "切换",

@@ -163,10 +163,30 @@ object SessionStore {
         //   → `encoded` 每次都不等于已存串 → 守卫**永不命中** → 照旧 bump。
         //   真机铁证：装上新包后 `user-info/context/batchGet` 依旧每 ~600ms 一轮。
         //
-        // 正解：用**明文**（`cookies` 入参本身，调用方传入的一直是解密后的值）
-        // 算指纹。明文不变即「cookie 未变化」，与密文随机性无关。
-        // 指纹单独存一个 key，不污染落盘密文（[KEY_COOKIES] 仍是密文）。
-        val plainFingerprint = json.encodeToString(cookies)
+        // 正解：用**明文**、且**只比较语义稳定的字段**。
+        //
+        // ★★ 2026-09-30 第三次修正（前两版仍刷屏的真因）：
+        //
+        //  v1：比「落盘密文 JSON」→ `ks_*` 走 AES-GCM 随机 IV，密文每次都变 → 永不命中。
+        //  v2：比「明文 JSON」→ 看着对，其实**还是永不命中** —— 因为
+        //      `expiresAt` 是 OkHttp 按 `Max-Age` 在**解析时**算出的
+        //      「当前时间 + maxAge」（见 [Cookie.saveFromResponse]），
+        //      服务端每次响应重算 → 每次值都不同 → 指纹每次都变。
+        //      真机铁证：装 v3.141.3/3.141.4 后 `user-info/context/batchGet`
+        //      依旧每 ~600ms 一轮。
+        //
+        //  所以指纹**必须排除 `expiresAt`**（以及任何由时间派生的字段），
+        //  只保留 name/value/domain/path/hostOnly/httpOnly/secure/persistent
+        //  这些「cookie 语义身份」。这样 cookie 真没变时指纹稳定，守卫才生效。
+        val plainFingerprint = cookies
+            .sortedBy { it.name }
+            .joinToString("\u0001") { c ->
+                listOf(
+                    c.name, c.value, c.domain, c.path,
+                    c.hostOnly.toString(), c.httpOnly.toString(),
+                    c.secure.toString(), c.persistent.toString(),
+                ).joinToString("\u0002")
+            }
         if (prefs().getString(KEY_COOKIES_PLAIN, null) == plainFingerprint) {
             // cookie 没有任何变化 —— 不写盘、不 bump、也不重置缓存。
             return

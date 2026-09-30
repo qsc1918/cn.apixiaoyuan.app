@@ -183,6 +183,8 @@ fun PkH5Screen(
                 override fun onPageFinished(view: WebView?, url: String?) {
                     viewModel.setProgress(100)
                     view?.title?.takeIf { it.isNotBlank() }?.let { viewModel.webTitle = it }
+                    // ★ 2026-09-30：无条件记录 —— 先钉死「H5 到底有没有加载完、URL 是啥」。
+                    cn.apixiaoyuan.app.core.log.AppLogger.i("PkH5", "onPageFinished: $url")
                     // 「老挂戏老叟」PK 侧注入：去排行榜动效 / 结算页自动开下一局。
                     // 本项目 PK 容器是自己的 WebView，直接 evaluateJavascript 即可，
                     // 不需要像 cn.nizou.sxd 那样 hook 宿主的 loadUrl。
@@ -244,7 +246,9 @@ fun PkH5Screen(
                     //   只留：自有域 + 路径以 /leo- 或 /math/ 或 /api/ 开头（业务接口特征）。
                     val host = runCatching { java.net.URI(url).host ?: "" }.getOrDefault("")
                     val isOwnHost = host.endsWith("yuanfudao.com") || host.endsWith("yuanfudao.biz")
-                    if (isOwnHost && (url.contains("/leo-") || url.contains("/math/") || url.contains("/api/"))) {
+                    // ★ 2026-09-30：先记录**所有自有域**请求（不只业务接口），
+                    //   否则分不清「H5 压根没发请求」vs「发了但被上面的关键字过滤掉」。
+                    if (isOwnHost) {
                         cn.apixiaoyuan.app.core.log.AppLogger.d(
                             "PkH5Proxy",
                             "子请求 ${req.method} $url 代理=${PkH5Proxy.shouldProxy(method, url)}",

@@ -86,6 +86,11 @@ class AccountStatsViewModel : ViewModel() {
      * 被频控/401，其余读数仍能显示，而不是整页空白。
      */
     fun refresh() {
+        // ★ 2026-09-30：**防重入** —— 真机曾出现「每秒重打 3 个接口」的循环。
+        //   `job?.cancel()` 只取消上一个协程，但上一个请求已 in-flight 时，
+        //   新一轮 `LaunchedEffect` 又会再起一次；配合重组就会形成高频循环。
+        //   这里用 `loading` 直接短路：一轮没结束就不开第二轮。
+        if (loading) return
         job?.cancel()
         loading = true
         error = null
