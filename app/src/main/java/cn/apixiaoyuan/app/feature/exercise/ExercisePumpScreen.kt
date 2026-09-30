@@ -339,10 +339,28 @@ class ExercisePumpViewModel : ViewModel() {
         append("已手动停止")
     }
 
-    /** 只保留最近 300 行，避免长跑爆内存。 */
+    /**
+     * 日志追加 + **批量**裁剪。
+     *
+     * ★ 2026-09-30：此前是「超过 300 就 `removeAt(0)`」——**每来一行就删一行**。
+     * 那会让滚动条的 `maxValue` 在**每一帧**都变小，跟随滚动的目标跟着抖，
+     * 表现为「一旦开始删头就再也不丝滑了」（用户原话）。
+     *
+     * 改成**批量**裁剪：到 [MAX_LINES] 才一次性删掉 [TRIM_BATCH] 行。
+     * 触发频率降到原来的 1/100，滚动目标在绝大多数时间稳定 → 保持丝滑。
+     */
     private fun append(line: String) {
         logs.add(line)
-        if (logs.size > 300) logs.removeAt(0)
+        if (logs.size > MAX_LINES) {
+            repeat(TRIM_BATCH) { if (logs.isNotEmpty()) logs.removeAt(0) }
+        }
+    }
+
+    private companion object {
+        /** 保留上限。 */
+        const val MAX_LINES = 500
+        /** 一次裁剪多少行（批量，避免每帧抖动）。 */
+        const val TRIM_BATCH = 100
     }
 }
 

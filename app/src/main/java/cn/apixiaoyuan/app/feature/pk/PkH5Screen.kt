@@ -185,6 +185,25 @@ fun PkH5Screen(
                     view?.title?.takeIf { it.isNotBlank() }?.let { viewModel.webTitle = it }
                     // ★ 2026-09-30：无条件记录 —— 先钉死「H5 到底有没有加载完、URL 是啥」。
                     cn.apixiaoyuan.app.core.log.AppLogger.i("PkH5", "onPageFinished: $url")
+                    // ★★ 关键取证：H5 加载完后，把**页面可见文本**打出来。
+                    //   真机上 PK H5 已加载（onPageFinished 有）、桥也部分被调，
+                    //   但一个 HTTP 请求都没发。此时「页面显示什么」是唯一能一眼
+                    //   判断卡在哪一步的证据（「登录后开始PK」= 未登录分支；
+                    //   「更多模式，敬请期待」= 已登录但入口没渲染）。
+                    view?.evaluateJavascript(
+                        "(function(){try{return (document.body&&document.body.innerText||'')" +
+                            ".replace(/\\s+/g,' ').slice(0,300)}catch(e){return 'ERR:'+e}})()",
+                    ) { v ->
+                        cn.apixiaoyuan.app.core.log.AppLogger.i("PkH5", "页面文本: $v")
+                    }
+                    view?.evaluateJavascript(
+                        "(function(){try{return ['WebView','CommonWebView','LeoWebView'," +
+                            "'LeoSecureWebView'].map(function(k){return k+'='+!!window[k]}).join(',')" +
+                            "+(window.LeoWebView&&window.LeoWebView.getBasicInfo?' +getBasicInfo':' -getBasicInfo')" +
+                            "}catch(e){return 'ERR:'+e}})()",
+                    ) { v ->
+                        cn.apixiaoyuan.app.core.log.AppLogger.i("PkH5", "桥对象: $v")
+                    }
                     // 「老挂戏老叟」PK 侧注入：去排行榜动效 / 结算页自动开下一局。
                     // 本项目 PK 容器是自己的 WebView，直接 evaluateJavascript 即可，
                     // 不需要像 cn.nizou.sxd 那样 hook 宿主的 loadUrl。
@@ -302,16 +321,20 @@ fun PkH5Screen(
             // ⚠️ 过滤：只落「像业务诊断」的行（H5 的关键 console + 错误），
             //    不把 H5 的一堆 info 全打进来（否则又刷屏）。
             webChromeClient = object : WebChromeClient() {
+                // ★ 前若干条 console 无条件记录 —— 验证 onConsoleMessage 到底有没有被调用。
+                private var seen = 0
                 override fun onConsoleMessage(msg: ConsoleMessage?): Boolean {
                     val m = msg ?: return false
                     val text = m.message() ?: return false
-                    val keep = text.contains("最终结果") ||
+                    val keep = seen < 10 ||
+                        text.contains("最终结果") ||
                         text.contains("webviewLogin") ||
                         text.contains("isLogin") ||
                         text.contains("homepage") ||
                         text.contains("userInfo") ||
                         m.messageLevel() == ConsoleMessage.MessageLevel.ERROR
                     if (keep) {
+                        seen++
                         cn.apixiaoyuan.app.core.log.AppLogger.d(
                             "PkH5JS",
                             "[${m.messageLevel()}] ${m.sourceId()}:${m.lineNumber()} $text",

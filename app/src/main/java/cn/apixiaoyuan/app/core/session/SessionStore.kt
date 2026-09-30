@@ -36,6 +36,8 @@ object SessionStore {
     private const val KEY_COOKIES = "cookieJsonListKey"
     /** cookie 的**明文**指纹（用于 [saveCookies] 的幂等判定，见其 KDoc）。 */
     private const val KEY_COOKIES_PLAIN = "cookiePlainFingerprintKey"
+    /** 上次见过的登录身份（`userid`）。只有它变化才 [bump]（见 [saveCookies]）。 */
+    private const val KEY_LAST_IDENTITY = "lastLoginIdentityKey"
     private const val KEY_YFD_U = "yfd_u"
     private const val KEY_GRADE = "grade"
     private const val KEY_NICKNAME = "current_nickname"
@@ -175,7 +177,7 @@ object SessionStore {
         //      真机铁证：装 v3.141.3/3.141.4 后 `user-info/context/batchGet`
         //      依旧每 ~600ms 一轮。
         //
-        //  所以指纹**必须排除 `expiresAt`**（以及任何由时间派生的字段），
+//  所以指纹**必须排除 `expiresAt`**（以及任何由时间派生的字段），
         //  只保留 name/value/domain/path/hostOnly/httpOnly/secure/persistent
         //  这些「cookie 语义身份」。这样 cookie 真没变时指纹稳定，守卫才生效。
         val plainFingerprint = cookies
@@ -202,10 +204,44 @@ object SessionStore {
         // 这样即便调用方传入的 value 已是密文（幂等场景）也不会缓存错。
         cachedCookies = toStore.map { it.decryptedFromStorage() }
         // sid 或 userid 存在即视为有登录态（userid 不加密，直接读原值）
-        cookies.firstOrNull { it.name == "userid" }?.value?.toLongOrNull()?.let {
-            prefs().edit().putLong(KEY_YFD_U, it).apply()
+        val userIdNow = cookies.firstOrNull { it.name == "userid" }?.value?.toLongOrNull()
+        if (userIdNow != null) {
+            prefs().edit().putLong(KEY_YFD_U, userIdNow).apply()
         }
-        bump()
+
+        // ★★★ 2026-09-30 第四次修正（三版守卫都拦不住的真因）：
+        //
+        // 前面三版都在纠结「指纹怎么算」，但**真正的问题不在指纹** ——
+        // 是**根本不该由 `saveCookies`（每个响应都调）来 bump**。
+        //
+        // ## `stateRevision` 到底给谁用
+        //
+        // 全项目**唯一**的消费者是 `HomeViewModel` 的
+        // `snapshotFlow { stateRevision } → refreshAccounts()`，
+        // 目的是「重新拉子账号列表」。这件事**只在「登录用户变了」时才需要**
+        // （登录 / 登出 / 切号 / 导入新登录态）。
+        //
+        // 而「cookie 内容变了一点」不等于「登录用户变了」—— 服务端每次响应都可能
+        // 重发 `Set-Cookie`（Max-Age 重算、`ks_*` 轮换、`g_sess` 刷新…），
+        // 指纹再准也拦不住这种**真实**变化。只要还无条件 bump，自激环就还在：
+        //
+        //     bump → refreshAccounts → fetchSubAccounts（user-info/context/batchGet）
+        //          → 响应带 Set-Cookie → saveCookies → bump → ……（永动）
+        //
+        // 真机铁证（v3.141.5）：`user-info/context/batchGet` 每 ~300ms 一轮，
+        // 两份附件共 1630 行、1561 行是 `LeoNet`，全是这三个接口。
+        //
+        // ## 修法
+        //
+        // **只有 `userid`（登录身份）真的变化时才 bump。** 其余 cookie 变动
+        // 照常落盘、照常刷新缓存，但**不惊动 UI** —— 它们本来就不需要重拉列表。
+        // 这样自激环从「源头」被斩断，与指纹算得准不准彻底无关。
+        val identityBefore = prefs().getLong(KEY_LAST_IDENTITY, -1L)
+        val identityNow = userIdNow ?: -1L
+        prefs().edit().putLong(KEY_LAST_IDENTITY, identityNow).apply()
+        if (identityNow != identityBefore) {
+            bump()
+        }
     }
 
     /**
