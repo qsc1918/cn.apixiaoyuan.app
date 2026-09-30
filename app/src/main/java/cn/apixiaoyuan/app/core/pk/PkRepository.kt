@@ -32,12 +32,34 @@ object PkRepository {
     private const val PK_H5_PATH = "/bh5/leo-web-oral-pk/pk.html#/"
 
     /**
+     * PK 入口 URL 的**公共参数**（★ 2026-09-30）。
+     *
+     * 原版真机打开这个 H5 时，URL 上并非裸路径，而是带了一组 PK 专属参数；
+     * 服务端（SolarAuthFilter）会据此做产品校验 —— **缺 `_productId=631` 恒 401**
+     * （记忆 #36：611 → 401，631 → 200）。
+     *
+     * 浏览器直连模式（H5 自己发请求、未经我们的原生代发）时，这组参数就是
+     * 唯一的产品标识来源，所以必须挂在入口 URL 上。
+     *
+     * 注意 `#` 之后是 SPA 的 hash 路由，参数必须放在 `#` **之前**。
+     */
+    private const val PK_H5_QUERY = "?_productId=631&_appId=6&version=3.141.1&isBackground=0"
+
+    /**
      * 拼 PK 入口完整 URL。
      *
      * 域名走 [NetworkConfig.leoBaseUrl]，与主域 Service 一致 ——
      * 原版这个 H5 就挂在主域下，不是独立域。
+     *
+     * 参数插在 `#` 之前（见 [PK_H5_QUERY]）。
      */
-    fun pkH5Url(): String = NetworkConfig.leoBaseUrl() + PK_H5_PATH
+    fun pkH5Url(): String {
+        val base = NetworkConfig.leoBaseUrl()
+        val hashAt = PK_H5_PATH.indexOf('#')
+        val path = if (hashAt >= 0) PK_H5_PATH.substring(0, hashAt) else PK_H5_PATH
+        val hash = if (hashAt >= 0) PK_H5_PATH.substring(hashAt) else ""
+        return base + path + PK_H5_QUERY + hash
+    }
 
     /**
      * 拉诗词 PK 入口数据（`getPoemsPkEntryData`）。

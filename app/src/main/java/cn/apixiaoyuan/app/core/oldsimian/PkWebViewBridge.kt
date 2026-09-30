@@ -7,6 +7,7 @@ import android.util.Base64
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
+import cn.apixiaoyuan.app.BuildConfig
 import cn.apixiaoyuan.app.core.log.AppLogger
 import cn.apixiaoyuan.app.core.native.ContentBridge
 import cn.apixiaoyuan.app.core.session.SessionStore
@@ -223,6 +224,310 @@ class PkWebViewBridge(
         respond(payload, ok(JSONArray()))
     }
 
+    // ==================== 功能开关 / 缺失能力（2026-09-30 照逆向补齐） ====================
+
+    /**
+     * 功能开关表（feature flag / orion key）—— ★ PK 页面「控件缺失 / 返回键行为错」的根治点。
+     *
+     * ## 为什么必须在原生桥里给真值（pk-node 侧 9135323 已证实）
+     *
+     * H5 的 `feature-legacy` 取值链是：
+     *   ① 原生桥 `getFeatureConfig`（能力 version >= 3.36.0）  ← 真机走这条
+     *   ② HTTP `POST {ORION_HOST}/orion-config-center/api/feature-config`，
+     *      `.catch(() => 默认值)`
+     * 而 xyst / oapi / xyks 三家 orion 端点实测**全部 404** → 不实现 ① 时，
+     * 所有开关都会降级到 H5 自己的默认值，于是「8人PK 不出、荣誉榜空、
+     * 返回键变成继续打卡」等问题就会随机出现。
+     *
+     * ## 取值逐条来自 H5 源码（勿凭感觉改）
+     *
+     * | key | 值 | 依据 |
+     * |---|---|---|
+     * | `leo.unlogin.pk` | `"false"` | 未登录 PK 入口；我们是登录态使用 |
+     * | `leoShowPreschool` | `"false"` | 学龄前入口 |
+     * | `leoOralPKExerciseUseMerge` | `"false"` | 对局页用 exercise.html（非 oral-merge） |
+     * | `leo.fusion.honor.ranking.config` | `{content:{inUse:false}}` | ★★ **必须 false**：为 true 时结算页「返回」走 `toFusionClockIn()`（继续打卡）而非返回 |
+     * | `leo.oral.pk.schoolSeason.entry` | `{content:{enable:false}}` | 校园赛季入口 |
+     * | `leo.pk.matching.waiting.text` | `{content:{courses:[]}}` | 匹配等待文案 |
+     *
+     * 未收录的 key 返回 null → H5 走 HTTP 兜底（404）→ 用它自己的默认值。
+     */
+    private val FEATURE_CONFIG: Map<String, Any> = mapOf(
+        "leo.unlogin.pk" to "false",
+        "leoShowPreschool" to "false",
+        "leoOralPKExerciseUseMerge" to "false",
+        // ★★ 必须 false（否则结算页「返回」变成继续打卡流程）
+        "leo.fusion.honor.ranking.config" to mapOf("content" to mapOf("inUse" to false)),
+        "leo.oral.pk.schoolSeason.entry" to mapOf("content" to mapOf("enable" to false)),
+        "leo.pk.matching.waiting.text" to mapOf("content" to mapOf("courses" to emptyList<Any>())),
+    )
+
+    /**
+     * 取功能开关值。键名可能来自 `featureKey`（getFeatureConfig）或
+     * `orionKey`（getOrionConfig）；未收录返回 null（H5 自行兜底）。
+     */
+    private fun featureValue(key: String?): Any? =
+        key?.takeIf { it.isNotBlank() }?.let { FEATURE_CONFIG[it] }
+
+    /** octopus 埋点 SDK 的配置读取（H5 调 module=leo / method=getOrionConfig）。 */
+    @JavascriptInterface
+    fun getOrionConfig(payload: String?) {
+        val key = firstArgObj(payload)?.optString("orionKey")
+            ?: firstArgObj(payload)?.optString("featureKey")
+            ?: firstArgObj(payload)?.optString("key")
+        val v = featureValue(key)
+        AppLogger.d(TAG_BRIDGE, "getOrionConfig key=$key hit=${v != null}")
+        if (v != null) respond(payload, ok(v)) else respond(payload, ok())
+    }
+
+    /** 功能开关（与 getOrionConfig 同表，取键优先级不同）。 */
+    @JavascriptInterface
+    fun getFeatureConfig(payload: String?) {
+        val key = firstArgObj(payload)?.optString("featureKey")
+            ?: firstArgObj(payload)?.optString("orionKey")
+            ?: firstArgObj(payload)?.optString("key")
+        val v = featureValue(key)
+        AppLogger.d(TAG_BRIDGE, "getFeatureConfig key=$key hit=${v != null}")
+        if (v != null) respond(payload, ok(v)) else respond(payload, ok())
+    }
+
+    /**
+     * 练习信息（能力桥）—— 年级来源之一。
+     *
+     * 契约（oral-pk-legacy）：`getExerciseInfo` →
+     * `{ exerciseGradeId, exerciseSemesterId }`，调用方用 `exerciseGradeId` 当 grade。
+     * 返回真实年级（`SessionStore.grade()`），缺了就退回 1。
+     */
+    @JavascriptInterface
+    fun getExerciseInfo(payload: String?) {
+        val grade = SessionStore.grade() ?: 1
+        respond(
+            payload,
+            ok(JSONObject().put("exerciseGradeId", grade).put("exerciseSemesterId", 1)),
+        )
+    }
+
+    /** 练习配置（useUserInfo 能力 >= 3.81.0）。回当前年级 + 学期。 */
+    @JavascriptInterface
+    fun getExerciseConfig(payload: String?) {
+        val grade = SessionStore.grade() ?: 1
+        respond(
+            payload,
+            ok(
+                JSONObject()
+                    .put("grade", grade)
+                    .put("semester", 1)
+                    .put("bookMath", 1)
+                    .put("bookChinese", 1)
+                    .put("bookEnglish", 1),
+            ),
+        )
+    }
+
+    /** 手写识别。真机走 native OCR；本机没有，回空串交由 H5 判定（视为未识别）。 */
+    @JavascriptInterface
+    fun recognize(payload: String?) {
+        respond(payload, ok(JSONObject().put("result", "")))
+    }
+
+    /**
+     * 网络失败处理（request-legacy networkFailedManageByJsb）。
+     *
+     * ★ 契约特殊：`a('networkFailedManage',{...},'leo').then(e => e ? reject(...) : resolve())`
+     *   —— **返回值非空 = H5 视为失败并 reject**，必须回空串才 resolve。
+     */
+    @JavascriptInterface
+    fun networkFailedManage(payload: String?) {
+        respond(payload, ok(""))
+    }
+
+    /**
+     * 「练习弹窗要不要弹」（pk-legacy，能力 >= 3.118）。
+     *
+     * `x('ShowPracticeDialogIfNeeded',{trigger:(e,t)=>{!e&&t&&t.dialogNeedToShow}},'leo')`
+     * —— trigger 是**查询回调**，必须回 `{dialogNeedToShow:false}`（不弹）。
+     */
+    @JavascriptInterface
+    fun ShowPracticeDialogIfNeeded(payload: String?) {
+        respond(payload, ok(JSONObject().put("dialogNeedToShow", false)))
+    }
+
+    /**
+     * 评分弹窗频率（useRatingPopup）。
+     *
+     * `d() = new Promise(t => o('getRatingPopupFrequency',{trigger:(r,e)=>t(r?null:e)},'leo'))`
+     * —— ★ 回 null（经 `[null, null]`）时 `r` 为空 → `t(null)` → H5 判定「不弹」。
+     * 回非 null 会走频率计算，可能弹评分框。故这里回 null。
+     */
+    @JavascriptInterface
+    fun getRatingPopupFrequency(payload: String?) {
+        respond(payload, b64(JSONArray().put(JSONObject.NULL).put(JSONObject.NULL).toString()))
+    }
+
+    /**
+     * 无登录体验值（结算页 `kt()`）。
+     *
+     * `Q('getUnloggedUserExerciseExperience',{trigger:(a,i)=>{a?reject:a→resolve({lastExp:i.experience})}},'leo')`
+     * —— 必须回 `{experience: <number>}`。
+     */
+    @JavascriptInterface
+    fun getUnloggedUserExerciseExperience(payload: String?) {
+        respond(payload, ok(JSONObject().put("experience", 0)))
+    }
+
+    // ==================== setter / 无返回值能力（★ 必须存在，否则 H5 直调即 TypeError） ====================
+    //
+    // ★★ 为什么每一个都要显式声明（2026-09-30 读 H5 的桥调用器得出）：
+    //
+    // H5 的桥调用器（`index-legacy.CHYoHfC0.js` 的 `Lt`）判定链是：
+    //   `St[g] && St[g][method] ? St[g][method](json)      // ← 优先「前缀对象直调」
+    //                             : St.LeoWebView.callNative(...)`   // ← 才回退
+    //
+    // 我们把同一实例注册成 WebView / CommonWebView / LeoWebView / LeoSecureWebView，
+    // 所以只要**实例上有这个方法**，H5 就会直调它、不会走 callNative。
+    // 反之：若只写在 `callNative` 的 `when` 里，H5 直调时找不到方法 →
+    // **JS TypeError / Promise 永久挂起**（页面哑掉）。故必须逐个声明。
+    //
+    // setter 类（setXxx / observeXxx）用 [respondSetter]：**只回复执、不回 trigger**，
+    // 否则等于「替用户按下返回键」（见 [NO_TRIGGER_METHODS]）。
+
+    /** 下拉回弹开关（对局页进入时关掉，避免误触橡皮筋）。 */
+    @JavascriptInterface
+    fun setBounceEnable(payload: String?) = respondSetter(payload)
+
+    /** 强制回弹开关。 */
+    @JavascriptInterface
+    fun setForceBounceEnable(payload: String?) = respondSetter(payload)
+
+    /** 可见性变化处理器登记。 */
+    @JavascriptInterface
+    fun setOnVisibilityChange(payload: String?) = respondSetter(payload)
+
+    /** 左侧按钮（返回键）处理器登记 —— ★ 绝不能立即回调，否则页面自己关掉。 */
+    @JavascriptInterface
+    fun setLeftButton(payload: String?) = respondSetter(payload)
+
+    /** 融合打卡弹窗处理器登记（同 setLeftButton，只登记）。 */
+    @JavascriptInterface
+    fun setOnInteractivePopped(payload: String?) = respondSetter(payload)
+
+    /** tab 变化监听登记。 */
+    @JavascriptInterface
+    fun observeTabChange(payload: String?) = respondSetter(payload)
+
+    /** 状态栏/导航栏刷新（无返回值）。 */
+    @JavascriptInterface
+    fun refreshStateView(payload: String?) = respondSetter(payload)
+
+    /** 标题设置（无返回值）。 */
+    @JavascriptInterface
+    fun setTitle(payload: String?) = respond(payload, ok())
+
+    /** loading 显隐（无返回值）。 */
+    @JavascriptInterface
+    fun loading(payload: String?) = respond(payload, ok())
+
+    /** H5 脚本加载完成通知（无返回值）。 */
+    @JavascriptInterface
+    fun jsLoadComplete(payload: String?) = respond(payload, ok())
+
+    /** 埋点上报（客户端日志）。 */
+    @JavascriptInterface
+    fun addMergeableKlog(payload: String?) = respond(payload, ok())
+
+    /** 功能埋点记录。 */
+    @JavascriptInterface
+    fun addFunctionRecord(payload: String?) = respond(payload, ok())
+
+    /** 向原生发事件（如 `leo_web_event_oralPKFinish`）。 */
+    @JavascriptInterface
+    fun sendEventToNative(payload: String?) = respond(payload, ok())
+
+    /** 无登录记录上报（结算页）。 */
+    @JavascriptInterface
+    fun addUnloggedUserExerciseRecord(payload: String?) = respond(payload, ok())
+
+    /** 分享成图（无返回值）。 */
+    @JavascriptInterface
+    fun doShareAsImage(payload: String?) = respond(payload, ok())
+
+    /** 主动展示评分弹窗（无返回值）。 */
+    @JavascriptInterface
+    fun showRatingPopup(payload: String?) = respond(payload, ok())
+
+    /** 定位。契约：回 `{latitude, longitude}`（oral-pk-legacy 读 a.latitude / a.longitude）。 */
+    @JavascriptInterface
+    fun getLocation(payload: String?) {
+        respond(payload, ok(JSONObject().put("latitude", 0).put("longitude", 0)))
+    }
+
+    /** 是否 App Store 版。回 false（我们不是商店壳）。 */
+    @JavascriptInterface
+    fun isAppStoreVersion(payload: String?) {
+        respond(payload, ok(false))
+    }
+
+    /** 烟花配置（无实际数据，回 null 让 H5 走默认）。 */
+    @JavascriptInterface
+    fun getFireworkConfig(payload: String?) {
+        respond(payload, b64(JSONArray().put(JSONObject.NULL).put(JSONObject.NULL).toString()))
+    }
+
+    /** 抗沉迷查询。回「无限制」。 */
+    @JavascriptInterface
+    fun queryAntiAddiction(payload: String?) {
+        respond(payload, ok(JSONObject().put("status", 0)))
+    }
+
+    /** WebView 信息（能力判定用）。版本与 UA 一致，避免 H5 关掉功能。 */
+    @JavascriptInterface
+    fun getWebViewInfo(payload: String?) {
+        respond(
+            payload,
+            ok(
+                JSONObject()
+                    .put("version", BuildConfig.VERSION_NAME.substringBefore('-'))
+                    .put("platform", "android"),
+            ),
+        )
+    }
+
+    /** 会员权益（无数据时回空权限）。 */
+    @JavascriptInterface
+    fun getUserRights(payload: String?) {
+        respond(
+            payload,
+            ok(
+                JSONObject()
+                    .put("isVip", false)
+                    .put("isSVip", false)
+                    .put("isStudyGroup", false)
+                    .put("studyGroupRightType", 0),
+            ),
+        )
+    }
+
+    /** VIP 权益明细。 */
+    @JavascriptInterface
+    fun getVipRightInfo(payload: String?) {
+        respond(payload, ok())
+    }
+
+    /** 设备标识（稳定伪 id 由 SessionStore/设备链派生；缺则空）。 */
+    @JavascriptInterface
+    fun getDeviceId(payload: String?) {
+        val id = SessionStore.cookie("ks_deviceid") ?: ""
+        respond(payload, ok(JSONObject().put("deviceId", id)))
+    }
+
+    /** octopus 埋点配置（无返回值）。 */
+    @JavascriptInterface
+    fun addFrog(payload: String?) = respond(payload, ok())
+
+    /** 埋点（同 addFrog 的另一写法）。 */
+    @JavascriptInterface
+    fun addFrogBatch(payload: String?) = respond(payload, ok())
+
     // ==================== LeoSecure 前缀能力 ====================
 
     /**
@@ -307,10 +612,27 @@ class PkWebViewBridge(
             "openWebView" -> openWebView(p)
             "closeWebView" -> closeWebView(p)
             "toast" -> toast(p)
-            // 其余（getOrionConfig / getFeatureConfig / addFrog / setTitle /
-            // scrollStateChanged 之类）H5 不依赖返回值，回成功即可，
-            // 关键是**必须回调**，否则那几个 Promise 会一直挂着。
-            else -> respond(p, ok())
+            // ★ 2026-09-30 补齐（照逆向：H5 实调，缺了会 bridge-miss）
+            "getOrionConfig" -> getOrionConfig(p)
+            "getFeatureConfig" -> getFeatureConfig(p)
+            "getExerciseInfo" -> getExerciseInfo(p)
+            "getExerciseConfig" -> getExerciseConfig(p)
+            "recognize" -> recognize(p)
+            "networkFailedManage" -> networkFailedManage(p)
+            "ShowPracticeDialogIfNeeded" -> ShowPracticeDialogIfNeeded(p)
+            "ShowMultiExpToolDialogIfNeeded" -> respond(p, ok())
+            "getRatingPopupFrequency" -> getRatingPopupFrequency(p)
+            "getUnloggedUserExerciseExperience" -> getUnloggedUserExerciseExperience(p)
+            // 其余（addFrog / setTitle / scrollStateChanged / setLeftButton /
+            // setBounceEnable / setForceBounceEnable / sendEventToNative /
+            // addMergeableKlog / addFunctionRecord / showRatingPopup /
+            // doShareAsImage / showRatingPopup / isAppStoreVersion /
+            // addUnloggedUserExerciseRecord / observeTabChange /
+            // refreshStateView / queryAntiAddiction / login / setOnVisibilityChange /
+            // setOnInteractivePopped / getLocation / getFireworkConfig 之类）
+            // H5 **不依赖返回值**，回成功即可；
+            // ★ 其余方法回成功即可；★ 关键：setter 类**不能回 trigger**（否则等于替用户按键）。
+            else -> if (method in NO_TRIGGER_METHODS) respondSetter(p) else respond(p, ok())
         }
     }
 
@@ -352,6 +674,77 @@ class PkWebViewBridge(
             }
         }
     }
+
+    /**
+     * ★★ setter 类方法：**只回复执，绝不回 trigger**（2026-09-30，对齐 pk-node 结论）。
+     *
+     * ## 为什么（否则 = 替用户按键）
+     *
+     * H5 的 `trigger` 有两种语义：
+     *  1. **查询类**（getUserInfo / getWebViewInfo / requestConfig / dataDecrypt …）
+     *     trigger 是「回执回调」，我们必须回调它把 Promise resolve 掉；
+     *  2. **setter 类**（setLeftButton / setOnVisibilityChange / refreshStateView /
+     *     setForceBounceEnable / setBounceEnable / observeTabChange /
+     *     setOnInteractivePopped …）
+     *     trigger 是页面**登记进原生侧的事件处理器**，等用户**真正按下**才该回调。
+     *
+     * 若在「登记那一刻」就回调它 —— 例如 `setLeftButton({trigger: () => 关闭页面})`
+     * —— 等于**页面一打开就把自己关掉**（真机症状：荣誉榜「打开又自己退回」）。
+     *
+     * 这些方法走 [respondSetter]（只回 `callback`/`jsCallBack`，跳过 `trigger`）。
+     */
+    private val NO_TRIGGER_METHODS = setOf(
+        "setLeftButton",
+        "setOnVisibilityChange",
+        "refreshStateView",
+        "setForceBounceEnable",
+        "setBounceEnable",
+        "observeTabChange",
+        "setOnInteractivePopped",
+    )
+
+    /** setter 语义的回调：优先 `callback`/`jsCallBack`，**不回 trigger**。 */
+    private fun respondSetter(payload: String?) {
+        val cb = extractReceiptCallback(payload) ?: return
+        if (!cb.matches(Regex("[A-Za-z0-9_$]+"))) return
+        main.post {
+            runCatching {
+                webView.evaluateJavascript(
+                    "window['$cb'] && window['$cb']('${ok()}')",
+                    null,
+                )
+            }
+        }
+    }
+
+    /**
+     * 只取「回执回调」名（`callback` / `jsCallBack`），**不含 `trigger`**。
+     *
+     * 与 [extractCallback] 的区别：后者会把 `trigger` 也算进去（查询类需要），
+     * 而 setter 类必须把 trigger 排除在外，见 [NO_TRIGGER_METHODS]。
+     */
+    private fun extractReceiptCallback(payload: String?): String? = runCatching {
+        val json = JSONObject(decodePayloadJson(payload) ?: return@runCatching null)
+        val layers = buildList {
+            json.optJSONObject("params")?.let { add(it) }
+            add(json)
+        }
+        for (layer in layers) {
+            for (key in RECEIPT_KEYS) {
+                layer.optString(key).takeIf { it.isNotBlank() && it != "null" }
+                    ?.let { return@runCatching it }
+            }
+            val args = layer.optJSONArray("arguments") ?: continue
+            for (i in 0 until args.length()) {
+                val a = args.optJSONObject(i) ?: continue
+                for (key in RECEIPT_KEYS) {
+                    a.optString(key).takeIf { it.isNotBlank() && it != "null" }
+                        ?.let { return@runCatching it }
+                }
+            }
+        }
+        null
+    }.getOrNull()
 
     /**
      * 规范化入参对象。
@@ -422,7 +815,7 @@ class PkWebViewBridge(
         val absolute = if (path.startsWith("http")) path else LEO_BASE + path
         val url = absolute.toHttpUrlOrNull() ?: return absolute
         val builder = url.newBuilder()
-        commonParams().forEach { (k, v) ->
+        commonParams(path).forEach { (k, v) ->
             if (url.queryParameter(k) == null) builder.addQueryParameter(k, v)
         }
         // sign 输入是 path（不含 query），放最后只为日志里醒目 —— 与拦截器一致。
@@ -432,18 +825,37 @@ class PkWebViewBridge(
         return builder.build().toString()
     }
 
-    /** 公共查询参数（逐字对齐原版真机请求；与 CommonQueryInterceptor 保持同源）。 */
-    private fun commonParams(): List<Pair<String, String>> = listOf(
-        PARAM_PRODUCT_ID to PRODUCT_ID,
-        PARAM_PLATFORM to "android${android.os.Build.VERSION.SDK_INT}",
-        PARAM_VERSION to cn.apixiaoyuan.app.BuildConfig.VERSION_NAME,
-        PARAM_VENDOR to "UC",
-        PARAM_AV to "5",
-        PARAM_DEVICE_CATEGORY to "phone",
-        PARAM_WEBVIEW_VERSION to "150",
-        PARAM_WH_RATIO to "2.17",
-        PARAM_IS_BACKGROUND to "0",
-    )
+    /**
+     * 公共查询参数（逐字对齐原版真机请求；与 CommonQueryInterceptor 保持同源）。
+     *
+     * ★ 2026-09-30：按端点区分 —— `/leo-game-pk/...`（PK）用 631 + `_appId=6` +
+     * `version=3.141.1`，其余用 611 + 主域版本。见 [PK_PRODUCT_ID]（记忆 #36：611 → 401）。
+     */
+    private fun commonParams(path: String): List<Pair<String, String>> {
+        val isPk = path.contains("/leo-game-pk/")
+        return if (isPk) listOf(
+            PARAM_PRODUCT_ID to PK_PRODUCT_ID,
+            PARAM_APP_ID to PK_APP_ID,
+            PARAM_PLATFORM to "android${android.os.Build.VERSION.SDK_INT}",
+            PARAM_VERSION to PK_VERSION,
+            PARAM_VENDOR to "UC",
+            PARAM_AV to "5",
+            PARAM_DEVICE_CATEGORY to "phone",
+            PARAM_WEBVIEW_VERSION to "150",
+            PARAM_WH_RATIO to "2.17",
+            PARAM_IS_BACKGROUND to "0",
+        ) else listOf(
+            PARAM_PRODUCT_ID to PRODUCT_ID,
+            PARAM_PLATFORM to "android${android.os.Build.VERSION.SDK_INT}",
+            PARAM_VERSION to cn.apixiaoyuan.app.BuildConfig.VERSION_NAME,
+            PARAM_VENDOR to "UC",
+            PARAM_AV to "5",
+            PARAM_DEVICE_CATEGORY to "phone",
+            PARAM_WEBVIEW_VERSION to "150",
+            PARAM_WH_RATIO to "2.17",
+            PARAM_IS_BACKGROUND to "0",
+        )
+    }
 
     /** 从 openWebView 的声明式参数里解出真实 url。 */
     private fun extractOpenUrl(payload: String?): String? = runCatching {
@@ -501,6 +913,14 @@ class PkWebViewBridge(
         /** 回调名候选键，顺序即优先级（`callback` 先于 `trigger`）。 */
         val CALLBACK_KEYS = arrayOf("callback", "trigger", "jsCallBack")
 
+        /**
+         * 「回执回调」候选键（★ 2026-09-30）—— 用于 setter 类方法。
+         *
+         * 与 [CALLBACK_KEYS] 的差别：**不含 `trigger`**。
+         * setter 类的 trigger 是「登记事件处理器」，登记时就回调 = 替用户按键。
+         */
+        val RECEIPT_KEYS = arrayOf("callback", "jsCallBack")
+
         /** `{client}` / `{device}` 占位符的取值。 */
         const val CLIENT = "android"
 
@@ -509,6 +929,7 @@ class PkWebViewBridge(
 
         const val PARAM_SIGN = "sign"
         const val PARAM_PRODUCT_ID = "_productId"
+        const val PARAM_APP_ID = "_appId"
         const val PARAM_PLATFORM = "platform"
         const val PARAM_VERSION = "version"
         const val PARAM_VENDOR = "vendor"
@@ -520,5 +941,13 @@ class PkWebViewBridge(
 
         /** 小猿口算产品号。真机抓包逐字：`hostProductId("611")`。 */
         const val PRODUCT_ID = "611"
+
+        // ---- PK 端点专属（★ 2026-09-30，对齐 pk-node / 记忆 #36） ----
+        /** PK 端点 `_productId`。611 → 401（SolarAuthFilter），631 → 200。 */
+        const val PK_PRODUCT_ID = "631"
+        /** PK 端点 `_appId`。原版 PK 请求恒带。 */
+        const val PK_APP_ID = "6"
+        /** PK 端点的协议版本口径（主域其余接口用 3.140.1）。 */
+        const val PK_VERSION = "3.141.1"
     }
 }

@@ -93,6 +93,24 @@ internal object PkH5Proxy {
     private const val REAL_CLIENT = "android"
 
     /**
+     * ★★ PK 端点的 `_productId` / `_appId`（2026-09-30，对齐 pk-node 权威结论）
+     *
+     * PK H5 打的全是 `/leo-game-pk/{client}/...`，而归一后即 `/leo-game-pk/android/...`。
+     * 这些端点由 `SolarAuthFilter` 守卫，**硬要求 `_productId=631`**：
+     *  - 记忆 #36（真机实测）：`_productId=611` → **401**；`631` → 200。
+     *  - 与练习链路（611）是**两套口径**，不能混用。
+     *
+     * 此前本类的 `COMMON_PARAMS` 用的是练习的 611，且未带 `_appId` ——
+     * H5 经此代发的所有 PK 请求都会 401 → 页面表现为「加载不出 / 登录态异常」。
+     *
+     * 原版真机 PK 请求恒为 `...&_productId=631&_appId=6&version=3.141.1`。
+     */
+    private const val PK_PRODUCT_ID = "631"
+    private const val PK_APP_ID = "6"
+    /** PK 端点自带的协议版本口径（与主域 3.140.1 不同，见 NetworkConfig 注释）。 */
+    private const val PK_VERSION = "3.141.1"
+
+    /**
      * 允许被归正的**模块段**（`api` 段的前一段）。
      *
      * 白名单而不是「见到 `api` 就换」：H5 也打其它域名/路径，
@@ -201,12 +219,19 @@ internal object PkH5Proxy {
      *
      * 公共参数与 `CommonQueryInterceptor` **同源**（那边供原生 Retrofit，这边供 H5），
      * 改一处记得改另一处。
+     *
+     * ★ 2026-09-30：`_productId` 按**端点**区分 ——
+     *  `/leo-game-pk/...`（PK）要 `631` + `_appId=6` + `version=3.141.1`；
+     *  其余主域请求沿用 `611` + `NetworkConfig.LEO_PROTOCOL_VERSION`。
+     *  见 [PK_PRODUCT_ID] 的 KDoc（记忆 #36：611 → 401）。
      */
     private fun withSignAndCommonQuery(url: String): String {
         val parsed = url.toHttpUrlOrNull() ?: return url
         val normalized = normalizeClientSegment(parsed)
         val builder = normalized.newBuilder()
-        COMMON_PARAMS.forEach { (k, v) -> if (normalized.queryParameter(k) == null) builder.addQueryParameter(k, v) }
+        val isPk = normalized.pathSegments.firstOrNull() == "leo-game-pk"
+        val params = if (isPk) PK_COMMON_PARAMS else COMMON_PARAMS
+        params.forEach { (k, v) -> if (normalized.queryParameter(k) == null) builder.addQueryParameter(k, v) }
         // sign 的输入是 encodedPath —— **必须在归正之后算**，否则签名与被请求的路径对不上。
         if (normalized.queryParameter(PARAM_SIGN) == null) {
             SignComputer.sign(normalized.encodedPath)?.let { builder.addQueryParameter(PARAM_SIGN, it) }
@@ -252,6 +277,29 @@ internal object PkH5Proxy {
         "platform" to "android${android.os.Build.VERSION.SDK_INT}",
         // ★ 主域协议版本（3.140.1），不是 App 的 versionName —— 见 NetworkConfig。
         "version" to cn.apixiaoyuan.app.core.network.NetworkConfig.LEO_PROTOCOL_VERSION,
+        "vendor" to "UC",
+        "av" to "5",
+        "deviceCategory" to "phone",
+        "webviewVersion" to "150",
+        "whRatio" to "2.17",
+        "isBackground" to "0",
+    )
+
+    /**
+     * PK 端点的公共参数（★ 2026-09-30 新增）。
+     *
+     * 与 [COMMON_PARAMS] 的差异只有三点，但每一点都致命：
+     *  - `_productId` = **631**（不是练习的 611）—— 否则 SolarAuthFilter 回 401；
+     *  - `_appId` = **6** —— 原版 PK 请求恒带；
+     *  - `version` = **3.141.1** —— PK 端点自己的口径（主域其余接口用 3.140.1）。
+     *
+     * 真机抓包（`auto_oral-2026-09-27.log`）与 pk-node 侧结论一致。
+     */
+    private val PK_COMMON_PARAMS: List<Pair<String, String>> = listOf(
+        "_productId" to PK_PRODUCT_ID,
+        "_appId" to PK_APP_ID,
+        "platform" to "android${android.os.Build.VERSION.SDK_INT}",
+        "version" to PK_VERSION,
         "vendor" to "UC",
         "av" to "5",
         "deviceCategory" to "phone",
