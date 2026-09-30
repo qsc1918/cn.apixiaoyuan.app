@@ -5,6 +5,8 @@ import cn.apixiaoyuan.app.BuildConfig
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.CookieManager
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebResourceError
@@ -276,6 +278,42 @@ fun PkH5Screen(
                 @Deprecated("Deprecated in API 24, but kept for older WebView")
                 override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
                     return url?.let { handleScheme(it, onFinish) } ?: false
+                }
+            }
+
+            // ★★ 2026-09-30：把 H5 自己的 console 落盘 —— 「PK 没有登录态」的
+            //   唯一可靠取证手段。
+            //
+            // 背景：H5 首屏「一年级 / 0 胜 / 胜率 0%」，我们只看到 getUserInfo 被调、
+            // 却看不到任何业务请求（`getHomepage` 从未发出）。要判定是
+            //   (a) isLogin=false 走了「登录后开始PK」分支，还是
+            //   (b) isLogin=true 但后续某步挂了，
+            // 只能看 H5 自己的推理。原版 index-legacy 里正好有几条关键 console：
+            //
+            //   `console.log(">>>>>>>>>最终结果", err, extData)`  ← getUserInfo 桥的返回值
+            //   `at("webviewLogin", r[0])`                        ← 写进 store 的 userInfo
+            //
+            // 没有它就只能靠猜 —— 这正是本项目反复踩坑的根源。
+            //
+            // ⚠️ 过滤：只落「像业务诊断」的行（H5 的关键 console + 错误），
+            //    不把 H5 的一堆 info 全打进来（否则又刷屏）。
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(msg: ConsoleMessage?): Boolean {
+                    val m = msg ?: return false
+                    val text = m.message() ?: return false
+                    val keep = text.contains("最终结果") ||
+                        text.contains("webviewLogin") ||
+                        text.contains("isLogin") ||
+                        text.contains("homepage") ||
+                        text.contains("userInfo") ||
+                        m.messageLevel() == ConsoleMessage.MessageLevel.ERROR
+                    if (keep) {
+                        cn.apixiaoyuan.app.core.log.AppLogger.d(
+                            "PkH5JS",
+                            "[${m.messageLevel()}] ${m.sourceId()}:${m.lineNumber()} $text",
+                        )
+                    }
+                    return true
                 }
             }
         }

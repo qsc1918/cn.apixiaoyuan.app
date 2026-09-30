@@ -1,129 +1,169 @@
 package cn.apixiaoyuan.app.core.design.component
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import kotlin.math.abs
 
 /**
- * 日志/流水列表的**自动跟随滚动**（★ 2026-09-30，用户明确定义的语义）。
+ * 日志/流水列表的**自动跟随滚动**（★ 2026-09-30 v4：二阶阻尼弹簧引擎）。
  *
  * ## 用户要的语义（逐字）
  *
  * > 「当到达底部时会介入自动滚动，当用户上滑后关闭自动滚动，
  * >   当下滑到底后又介入自动滚动，接着滚动要有丝滑的动画」
+ * >
+ * > 「你延迟 1 条日志当缓冲然后按照日志速度匹配滚动速度连贯起来」
+ * > 「滚动的速度应该和日志输出的速度匹配，做到连贯性下滑，看起来很快，就和 DeepSeek 一样」
  *
- * 拆成四条：
- *  1. **到底自动跟随**：内容追加时若视口已在底部 → 平滑滚到最新；
- *  2. **上滑即停**：用户往回翻 → **立刻**关闭自动跟随（不能再把他拽下去）；
- *  3. **回到底部即恢复**：用户自己滑回底部 → 重新开启自动跟随；
- *  4. **始终是动画**：跟随用 `animateScrollTo*`，不是瞬移。
+ * ## ★★ v4 的依据：dsh-smooth-stream 的「弹簧跟随引擎」
  *
- * ## 为什么用「显式开关」而不是每帧判断是否到底
+ * 用户直接给了参考实现的原理：**不要用 tween 插值一段一段滚**，而是用
+ * **二阶阻尼弹簧**把「内容高度的离散变化」转成**每帧连续的速度/位移轨迹**：
  *
- * 常见写法是每帧算 `lastVisibleIndex >= total - 1`。两个坑：
- *  - **惯性滚动（fling）期间**：手指离开后列表还在滚，中途会短暂「不在底部」，
- *    此时来了新日志就会被误判为「用户在翻阅」→ 关掉跟随且不再恢复；
- *  - **我们自己的动画期间**：`animateScrollTo` 途中同样「不在底部」，会被自己关掉。
+ * ```
+ * 内容高度变化 --> 弹簧跟随引擎(k=130,c=24,m=1) --> 逐帧连续位移
+ * ```
  *
- * 所以用一个显式开关 [autoFollow]，只在两处改变：
- *  - 用户**主动滚动**（`isScrollInProgress` 为真）→ 若结束时不在底部就关掉；
- *  - 位置到达（近）底部 → 无条件打开。
- * 我们自己的动画终点就是底部，会命中第二条，因此不会误关。
+ * 核心是**逐帧半隐式欧拉积分**：
  *
- * ## 两个重载
+ * ```
+ * a = (k * (target - x) - c * v) / m     // 弹簧力 - 阻尼力
+ * v += a * dt
+ * x += v * dt
+ * ```
  *
- *  - [AutoFollowScroll]（[ScrollState]）：配 `Modifier.verticalScroll` 用；
- *  - [AutoFollowScrollLazy]（[LazyListState]）：配 `LazyColumn` 用。
+ * 它天然解决 v2/v3 的两个问题：
+ *  - **不会一顿一顿**：新内容只是把 `target`（弹簧的静止点）抬高，
+ *    速度 `v` 是**连续的**（不会像 tween 那样每次重启都归零）；
+ *  - **速度自然匹配输出**：日志连续来 → target 持续抬高 → 弹簧维持一个
+ *    稳定的追赶速度，看起来就是「连贯下滑」。
+ *
+ * ## 掉帧自愈（对齐 dsh）
+ *
+ * 主线程卡顿时 `dt` 会很大 —— 若直接积分，恢复瞬间会「突进瞬移」。
+ * 所以把 `dt` **钳位在 ≤ 32ms**（见 [MAX_DT]）。
+ *
+ * ## 「1 条缓冲」
+ *
+ * 内容追加后先 `withFrameNanos {}` 等一帧让布局完成（此时 `maxValue`
+ * 才是新值），再把它设为弹簧的新 `target`。这一帧就是用户说的「缓冲」。
+ *
+ * ## 实现注意：suspend 的边界
+ *
+ * `withFrameNanos { }` 的 lambda **不是 suspend**，所以**积分在帧内、
+ * 应用位移在帧外**（`scrollBy` 是 suspend）。每帧存的位移放在局部变量里，
+ * 出 lambda 后再 `scrollBy`。
+ *
+ * ## 用户主动拖拽 → 关闭跟随
+ *
+ * 用 [SelfScrollFlag] 区分「我们自己的 `scrollBy`」与「用户手指」：
+ * `scrollBy` 期间 `isScrollInProgress` 也为 true，若不区分，
+ * **我们自己的跟随会被误判成用户在翻阅而永久关掉** —— 这正是前几版
+ * 「滚两下就不滚了」的死因。
  */
+private const val SPRING_K = 130f
+private const val SPRING_C = 24f
+private const val SPRING_M = 1f
+
+/** 掉帧钳位：单帧最多按 32ms 积分（对齐 dsh）。 */
+private const val MAX_DT = 0.032f
+
+/** 速度阈值：|v| 小于它就认为弹簧已静止。 */
+private const val REST_VELOCITY = 1.0f
+
+/** 首帧 / 兜底 dt（约 60fps）。 */
+private const val FALLBACK_DT = 1f / 60f
+
+/** 位移小于它就忽略（亚像素抖动）。 */
+private const val MIN_STEP = 0.5f
+
+/**
+ * 「当前滚动是我们自己发起的」标记（不参与重组，故不用 Compose 状态）。
+ */
+private class SelfScrollFlag {
+    @Volatile
+    var on = false
+}
 
 /** 配 `Modifier.verticalScroll(state)` 使用。 */
 @Composable
 fun AutoFollowScroll(
     state: ScrollState,
     itemCount: Int,
-    thresholdPx: Int = 24,
+    thresholdPx: Int = 48,
 ) {
     var autoFollow by remember { mutableStateOf(true) }
-    var lastCount by remember { mutableIntStateOf(0) }
+    val selfScroll = remember { SelfScrollFlag() }
 
-    // ① 监听滚动位置与手势。
+    // ① 手势 / 位置 → 开关（只在「用户主动拖拽」时关闭跟随）。
     LaunchedEffect(state) {
         snapshotFlow { Triple(state.isScrollInProgress, state.value, state.maxValue) }
             .collect { (inProgress, value, max) ->
                 val atBottom = max <= 0 || value >= max - thresholdPx
                 if (atBottom) {
                     autoFollow = true
-                } else if (inProgress) {
+                } else if (inProgress && !selfScroll.on) {
                     autoFollow = false
                 }
             }
     }
 
-    // ② 内容追加 → 平滑滚到底。
-    //
-    // ★★ 2026-09-30 v2：**速度恒定**（用户要求「滚动的速度应该和日志输出的速度匹配，
-    //    做到连贯性下滑，看起来很快很丝滑」）。
-    //
-    // 第一版用 `animateScrollTo(maxValue)`，两个问题：
-    //  1. 每条日志都**重启**一次动画 → 上一条还没滚完就被打断，观感「一卡一卡」；
-    //  2. 距离短时动画依然跑满默认时长 → 感觉「慢半拍」。
-    //
-    // 现在：按**剩余距离**算时长（恒定线速度），并用 `animateScrollTo(value+remaining)`
-    // 只滚动**差额** —— 差额小则时长短、立刻跟上；差额大则时长长但速度一致。
-    //
-    // ⚠️ `ScrollState` **没有** `animateScrollBy` 扩展（那是 `LazyListState` 的），
-    //    所以这里用 `animateScrollTo(目标值)` 等价表达「按差额滚动」。
+    // ② 内容追加 → 1 帧缓冲 + 弹簧逐帧跟随。
     LaunchedEffect(itemCount) {
-        if (itemCount > lastCount && autoFollow && itemCount > 0) {
-            // 等一帧让新内容参与布局，否则 maxValue 还是旧值、滚不到真正底部。
-            withFrameNanos { }
-            val remaining = state.maxValue - state.value
-            if (remaining > 0) {
-                val duration = scrollDurationFor(remaining)
-                state.animateScrollTo(
-                    state.value + remaining,
-                    tween(duration, easing = LinearEasing),
-                )
+        if (!autoFollow || itemCount <= 0) return@LaunchedEffect
+        withFrameNanos { }   // 「1 条缓冲」：等布局完成，maxValue 才是新值
+        var target = state.maxValue.toFloat()
+        var x = state.value.toFloat()
+        var v = 0f
+        var lastFrame = 0L
+        var guard = 0
+        while (autoFollow && guard++ < 100_000) {
+            // 每帧重读目标（新日志可能又来了）。
+            val newMax = state.maxValue.toFloat()
+            if (newMax > target) target = newMax
+            var step = 0f
+            withFrameNanos { now ->
+                val dt = if (lastFrame == 0L) {
+                    FALLBACK_DT
+                } else {
+                    ((now - lastFrame) / 1_000_000_000f).coerceIn(0f, MAX_DT)
+                }
+                lastFrame = now
+                // 半隐式欧拉：a = (k*(target-x) - c*v) / m
+                val a = (SPRING_K * (target - x) - SPRING_C * v) / SPRING_M
+                v += a * dt
+                x += v * dt
+                step = x - state.value
             }
+            if (abs(step) >= MIN_STEP) {
+                selfScroll.on = true
+                state.scrollBy(step)
+                selfScroll.on = false
+            }
+            if (target - state.value <= 0.5f && abs(v) < REST_VELOCITY) break
         }
-        lastCount = itemCount
     }
 }
 
-/**
- * 按「剩余距离」估算滚动时长 —— **恒定线速度**。
- *
- * 用户要「滚动速度与日志输出速度匹配」：日志连续输出时，每次只需要滚一小段，
- * 时长也相应很短，于是视觉上是**连续匀速**下滑，而不是「一顿一顿」。
- *
- * 速度取 ~3.2 像素/毫秒（≈ 3200 px/s）。折中考虑：
- *  - 太快（> 6 px/ms）会糊、看不清滚过什么；
- *  - 太慢（< 1.5 px/ms）跟不上日志输出节奏，会积压。
- * 时长钳制在 [80, 600] ms：再短会闪、再长会拖。
- */
-private fun scrollDurationFor(distancePx: Int): Int =
-    (distancePx / 3.2f).toInt().coerceIn(80, 600)
-
-/** 配 `LazyColumn(state = listState)` 使用。 */
+/** 配 `LazyColumn(state = listState)` 使用（按「距尾项像素」建模）。 */
 @Composable
 fun AutoFollowScrollLazy(
     lazyState: LazyListState,
     itemCount: Int,
 ) {
     var autoFollow by remember { mutableStateOf(true) }
-    var lastCount by remember { mutableIntStateOf(0) }
+    val selfScroll = remember { SelfScrollFlag() }
 
-    // ① 用 layoutInfo 判断「视口是否已到尾部」。
+    // ① 视口是否到尾项 + 手势 → 开关。
     LaunchedEffect(lazyState) {
         snapshotFlow {
             val info = lazyState.layoutInfo
@@ -136,23 +176,55 @@ fun AutoFollowScrollLazy(
         }.collect { (inProgress, atBottom, _) ->
             if (atBottom) {
                 autoFollow = true
-            } else if (inProgress) {
+            } else if (inProgress && !selfScroll.on) {
                 autoFollow = false
             }
         }
     }
 
-    // ② 内容追加 → 平滑滚到最新一条。
-    //
-    // ★ 2026-09-30 v2：两点加固。
-    //  1. **不依赖 itemCount 变化**也能跟上：若上一次没滚到位（列表还在布局），
-    //     这里用 totalItemsCount 重算目标，并等一帧布局完成。
-    //  2. 用 `animateScrollToItem` —— Lazy 列表按 item 滚，行高不一时比按像素更准。
+    // ② 内容追加 → 1 帧缓冲 + 弹簧逐帧跟随到尾项。
     LaunchedEffect(itemCount) {
-        if (itemCount > lastCount && autoFollow && itemCount > 0) {
-            withFrameNanos { }
-            lazyState.animateScrollToItem(itemCount - 1)
+        if (!autoFollow || itemCount <= 0) return@LaunchedEffect
+        withFrameNanos { }
+        var v = 0f
+        var lastFrame = 0L
+        var guard = 0
+        while (autoFollow && guard++ < 100_000) {
+            val info = lazyState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull() ?: break
+            val atEnd = last.index >= info.totalItemsCount - 1
+            // 「剩余距离」= 尾项底边 - 视口底边（没看到尾项时视为一个视口高）。
+            val target = if (atEnd) {
+                (last.offset + last.size) - info.viewportEndOffset
+            } else {
+                info.viewportEndOffset
+            }
+            if (target <= 0) break
+            var step = 0f
+            withFrameNanos { now ->
+                val dt = if (lastFrame == 0L) {
+                    FALLBACK_DT
+                } else {
+                    ((now - lastFrame) / 1_000_000_000f).coerceIn(0f, MAX_DT)
+                }
+                lastFrame = now
+                val a = (SPRING_K * target.toFloat() - SPRING_C * v) / SPRING_M
+                v += a * dt
+                step = v * dt
+            }
+            if (step >= MIN_STEP) {
+                selfScroll.on = true
+                lazyState.scrollBy(step)
+                selfScroll.on = false
+            }
+            // 到尾部且速度归零即停。
+            val info2 = lazyState.layoutInfo
+            val last2 = info2.visibleItemsInfo.lastOrNull()
+            if (last2 != null && last2.index >= info2.totalItemsCount - 1 &&
+                (last2.offset + last2.size) <= info2.viewportEndOffset + 1 && abs(v) < REST_VELOCITY
+            ) {
+                break
+            }
         }
-        lastCount = itemCount
     }
 }

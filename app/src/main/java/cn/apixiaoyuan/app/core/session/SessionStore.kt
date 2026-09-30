@@ -34,6 +34,8 @@ object SessionStore {
 
     private const val PREF_NAME = "leo_session"
     private const val KEY_COOKIES = "cookieJsonListKey"
+    /** cookie 的**明文**指纹（用于 [saveCookies] 的幂等判定，见其 KDoc）。 */
+    private const val KEY_COOKIES_PLAIN = "cookiePlainFingerprintKey"
     private const val KEY_YFD_U = "yfd_u"
     private const val KEY_GRADE = "grade"
     private const val KEY_NICKNAME = "current_nickname"
@@ -152,11 +154,28 @@ object SessionStore {
         // 表现就是：① 日志页被 `LeoNet` 刷屏；② 主页/列表一直在重组。
         //
         // 修法：**内容与已存的一致就什么都不做**（不写盘、不 bump）。
-        // 判据用「落盘形态的 JSON 字符串」比较 —— 它同时覆盖了 name/value/domain/
-        // path/expires 等全部字段，且与 [loadCookies] 的缓存形态同源，最稳。
+        //
+        // ★★ 2026-09-30 二次修正（v1 的守卫**失效**，真机照旧刷屏）：
+        //
+        // v1 用「落盘形态（**密文**）的 JSON」比较 —— 这是**错的**：
+        //   `ks_*` 的 value 走 [DeviceChainCipher] 的 **AES-GCM**，而 GCM 的
+        //   IV 是**每次随机**的 → 同一条明文 cookie 每次加密出的密文都不同
+        //   → `encoded` 每次都不等于已存串 → 守卫**永不命中** → 照旧 bump。
+        //   真机铁证：装上新包后 `user-info/context/batchGet` 依旧每 ~600ms 一轮。
+        //
+        // 正解：用**明文**（`cookies` 入参本身，调用方传入的一直是解密后的值）
+        // 算指纹。明文不变即「cookie 未变化」，与密文随机性无关。
+        // 指纹单独存一个 key，不污染落盘密文（[KEY_COOKIES] 仍是密文）。
+        val plainFingerprint = json.encodeToString(cookies)
+        if (prefs().getString(KEY_COOKIES_PLAIN, null) == plainFingerprint) {
+            // cookie 没有任何变化 —— 不写盘、不 bump、也不重置缓存。
+            return
+        }
         val encoded = json.encodeToString(toStore)
-        if (prefs().getString(KEY_COOKIES, null) == encoded) return
-        prefs().edit().putString(KEY_COOKIES, encoded).apply()
+        prefs().edit()
+            .putString(KEY_COOKIES, encoded)
+            .putString(KEY_COOKIES_PLAIN, plainFingerprint)
+            .apply()
         // 缓存失效必须在写盘之后、bump 之前：bump 会让 UI 立刻重组并
         // 读 loadCookies()，若此时缓存还指向旧值就会闪一帧旧数据。
         // 存的是「loadCookies() 会返回的形态」（对落盘形态解回来），
