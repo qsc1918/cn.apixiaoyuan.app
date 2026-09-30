@@ -107,6 +107,12 @@ fun AppNavHost(
             entry<RoutePkGrind>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                 cn.apixiaoyuan.app.feature.pk.PkGrindScreen(navController)
             }
+            // 「账号分数 / 任务」—— 刷分区的只读观测台（★ 2026-09-30）
+            entry<cn.apixiaoyuan.app.core.navigation.RouteAccountStats>(
+                swipeDismiss = NavSwipeDirection.LeftToRight,
+            ) {
+                cn.apixiaoyuan.app.feature.grind.AccountStatsScreen(navController)
+            }
             entry<RouteAccount>(swipeDismiss = NavSwipeDirection.LeftToRight) {
                 cn.apixiaoyuan.app.feature.account.AccountScreen(navController)
             }

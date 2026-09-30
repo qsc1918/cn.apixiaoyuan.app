@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -91,7 +92,6 @@ fun LogScreen(navController: AppNavController) {
     var refreshToken by remember { mutableIntStateOf(0) }
     var entries by remember { mutableStateOf<List<AppLogger.Entry>>(emptyList()) }
     var rawCrash by remember { mutableStateOf("") }
-
     LaunchedEffect(kind, levels, keyword, tagQuery, refreshToken) {
         if (kind == 0) {
             entries = AppLogger.query(levels = levels, tagQuery = tagQuery, keyword = keyword)
@@ -104,10 +104,76 @@ fun LogScreen(navController: AppNavController) {
         }
     }
 
+    /*
+     * ★ 2026-09-30：运行日志**自动跟随刷新**（原来是纯手动/仅进页时查一次）。
+     *
+     * 用户要的效果是「发一条新日志 → 列表多一条 → 有一个向下滚动的动画」，
+     * 这要求**页面在开着的时候自己发现新日志**。做法：轻量轮询（600ms）。
+     *
+     * 为什么用轮询而不是 Flow：
+     *  - [AppLogger] 是文件追加 + 内存环形缓冲，没有可观察的数据源；
+     *  - 给它加 Flow 会牵动日志核心（高频写路径），风险大于收益；
+     *  - 日志页是「偶尔开着看看」的页面，600ms 轮询的成本可以忽略。
+     *
+     * 只在 **kind == 0（运行日志）** 且 **过滤条件未变** 时轮询；
+     * 查询只在「条数/最后一条时间戳发生变化」时才写状态，避免无谓重组
+     * （否则每 600ms 都会触发一次 LazyColumn 重组，滚动动画会被打断）。
+     */
+    LaunchedEffect(kind, levels, keyword, tagQuery) {
+        if (kind != 0) return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(600)
+            val fresh = AppLogger.query(levels = levels, tagQuery = tagQuery, keyword = keyword)
+            // 仅当「条数变了」或「最后一条变了」才更新 —— 否则跳过，不打扰滚动。
+            // （Entry 没有数值时间戳，用 raw 原文比对最稳：它含到毫秒的时间前缀。）
+            if (fresh.size != entries.size ||
+                (fresh.isNotEmpty() && entries.isNotEmpty() && fresh.last().raw != entries.last().raw)
+            ) {
+                entries = fresh
+            }
+        }
+    }
+
     val listState = rememberLazyListState()
-    // 过滤条件变化 / 刷新后自动定位到最新一条（尾部）。
+
+    /*
+     * ★ 2026-09-30：日志滚动改「丝滑跟随」——不再是瞬间跳到底。
+     *
+     * 旧行为：`scrollToItem(lastIndex)` 是**瞬移**，新日志一来画面直接跳到最底，
+     * 观感生硬（用户形容「直接显示最新」）。
+     *
+     * 新行为：用 `animateScrollToItem` 做**位移动画** —— 发一条新日志就向下
+     * 平滑滚一段。三条准则：
+     *
+     *  1. **首次进入/切换过滤条件**（条目从 0 → N）用瞬移：此时做动画没有意义，
+     *     而且会让用户先看到顶部再滚一大段（很怪）。
+     *  2. **增量追加**（N → N+k，比如来了 1 条新日志）用平滑动画：这正是用户要的
+     *     「发一条新日志就有向下滚动的动画」。
+     *  3. **用户手动滚动时不要抢**：若用户正在往回翻看历史，新日志不该把他拽回去。
+     *     判据：只有当列表已接近底部（最后一条可见）时才自动跟随。
+     */
+    val atBottom by remember {
+        derivedStateOf {
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+            last == null || last.index >= listState.layoutInfo.totalItemsCount - 2
+        }
+    }
+    var lastCount by remember { mutableIntStateOf(0) }
+
     LaunchedEffect(entries.size, rawCrash.length) {
-        if (entries.isNotEmpty()) listState.scrollToItem(entries.lastIndex)
+        val target = if (entries.isNotEmpty()) entries.lastIndex else 0
+        val count = if (entries.isNotEmpty()) entries.size else (if (rawCrash.isNotEmpty()) 1 else 0)
+        when {
+            // ① 清空 / 切换过滤条件（或首次进入）→ 瞬移，不做动画。
+            lastCount == 0 || count <= lastCount -> {
+                if (count > 0) listState.scrollToItem(target)
+            }
+            // ② 增量追加，且用户本就停在底部 → 平滑滚到最新（丝滑跟随）。
+            atBottom -> listState.animateScrollToItem(target)
+            // ③ 用户正在看历史（不在底部）→ 不打扰，只记录条数。
+            else -> Unit
+        }
+        lastCount = count
     }
 
     AppScaffold(title = "日志", onBack = null) { pad ->

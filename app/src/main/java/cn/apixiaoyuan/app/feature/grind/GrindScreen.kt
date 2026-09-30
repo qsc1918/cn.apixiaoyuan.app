@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cn.apixiaoyuan.app.core.design.component.AppScrollScaffold
 import cn.apixiaoyuan.app.core.navigation.AppNavController
+import cn.apixiaoyuan.app.core.navigation.RouteAccountStats
 import cn.apixiaoyuan.app.core.navigation.RouteExercisePump
 import cn.apixiaoyuan.app.core.navigation.RoutePkGrind
 import cn.apixiaoyuan.app.core.navigation.RouteScorePump
@@ -72,7 +73,7 @@ fun GrindScreen(navController: AppNavController) {
                 EntryRow(
                     title = "练习刷对局",
                     summary = "与网页端同做法：选知识点 → 循环「出题 → 抄答案+笔迹 → 提交」，" +
-                        "按出题冷却（≈62s/账号）配速",
+                        "按出题冷却配速（默认 2s）",
                     onClick = { navController.navigate(RouteExercisePump) },
                 )
                 EntryRow(
@@ -80,6 +81,16 @@ fun GrindScreen(navController: AppNavController) {
                     summary = "直接上报经验增量，不需要出题做题。注意：同一 ruleType 每天只记一次，" +
                         "可记账类型仅 0/1 ⇒ 日上限 400",
                     onClick = { navController.navigate(RouteScorePump) },
+                )
+            }
+
+            // ---- 观测台：刷新查看账号分数 / 任务 ----
+            SectionCard(title = "查看") {
+                EntryRow(
+                    title = "账号分数 / 任务",
+                    summary = "只读观测台：刷新拉取「本周经验 / 今日积分 / 连续打卡 / 排名 / 今日任务」。" +
+                        "刷之前看基线、刷之后再刷新看涨了多少",
+                    onClick = { navController.navigate(RouteAccountStats) },
                 )
             }
 

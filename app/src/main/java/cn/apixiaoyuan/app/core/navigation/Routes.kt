@@ -109,6 +109,15 @@ data object RoutePkGrind : Route
 @Serializable
 data object RouteGrind : Route
 
+/**
+ * 「账号分数 / 任务」二级页（★ 2026-09-30 新增）。
+ *
+ * 从刷分区进入，只读观测台：刷新展示「本周经验 / 今日积分 / 连续打卡 / 排名 /
+ * 今日任务」。对应 pk-node 刷练习页的「刷新分数/任务」。
+ */
+@Serializable
+data object RouteAccountStats : Route
+
 /** 账号页（宝贝学习账号切换 + 改密码）。 */
 @Serializable
 data object RouteAccount : Route
