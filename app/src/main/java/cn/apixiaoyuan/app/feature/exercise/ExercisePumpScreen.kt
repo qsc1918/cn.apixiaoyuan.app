@@ -22,6 +22,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import cn.apixiaoyuan.app.core.design.component.AppScrollScaffold
+import cn.apixiaoyuan.app.core.design.component.AutoFollowScroll
 import cn.apixiaoyuan.app.core.exercise.ExercisePumpEngine
 import cn.apixiaoyuan.app.core.exercise.ExerciseRepository
 import cn.apixiaoyuan.app.core.model.ExerciseScopeKeypoint
@@ -185,11 +186,16 @@ fun ExercisePumpScreen(navController: AppNavController) {
                         contentColor = MiuixTheme.colorScheme.onSurfaceContainerHigh,
                     ),
                 ) {
+                    // ★ 2026-09-30：日志区接入**自动跟随滚动**（用户要求）。
+                    //   语义：到底部时自动跟随最新、上滑即停、再滑到底恢复、全程动画。
+                    //   见 [cn.apixiaoyuan.app.core.design.component.AutoFollowScroll]。
+                    val logScroll = rememberScrollState()
+                    AutoFollowScroll(state = logScroll, itemCount = vm.logs.size)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 160.dp, max = 360.dp)
-                            .verticalScroll(rememberScrollState())
+                            .verticalScroll(logScroll)
                             .padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {

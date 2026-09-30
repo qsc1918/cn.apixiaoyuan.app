@@ -195,6 +195,15 @@ internal object PkH5Proxy {
             .firstOrNull { it.key.equals("Cookie", true) }?.value
             ?: SessionStore.cookieHeader()
 
+        // ★ 2026-09-30：「PK 还是不行」的取证入口 —— 证明代理**确实被调用**了。
+        //   与 toWebResponse 的全量日志配对：有「代理请求」= 接管生效；
+        //   有「H5 … → 状态」= 真发出去了。
+        AppLogger.i(
+            TAG,
+            "代理请求 ${method.uppercase()} ${runCatching { java.net.URI(url).path }.getOrNull() ?: url}" +
+                " cookie=${if (cookie.isNullOrBlank()) "无" else cookie.split(";").size.toString() + "条"}",
+        )
+
         val builder = Request.Builder()
             .url(signed)
             .header("User-Agent", headers.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value ?: DEFAULT_UA)
@@ -226,15 +235,32 @@ internal object PkH5Proxy {
         val blockBy = resp.header("x-block-by")
         val code = resp.code
 
-        // 只把「可疑 / 出错」的记录进日志页：正常资源请求不刷屏。
-        val noteworthy = code >= 400 || blockBy != null
-        if (noteworthy) {
-            val msg = "H5 ${resp.request.method} ${resp.request.url.encodedPath} → $code" +
-                (blockBy?.let { " [x-block-by: $it]" } ?: "") +
-                " sign=${resp.request.url.queryParameter(PARAM_SIGN)?.take(8) ?: "无"}" +
-                " did=${resp.request.header("x-shepherd-did") ?: "无"}"
-            if (code >= 400) AppLogger.w(TAG, "$msg body=${bytes.decodeToString().take(160)}")
-            else AppLogger.d(TAG, msg)
+        // ★ 2026-09-30：**全量日志**（原为只记 4xx）。
+        //
+        // ## 为什么必须全量（用户报「PK 还是不行」时无日志可查）
+        //
+        // 原先只在 `code >= 400 || blockBy != null` 时打日志。后果：如果 PK 页面的
+        // 请求**根本没走到代理**（例如 WebView 直接发了、或 shouldInterceptRequest
+        // 没被调用），日志里一片空白 —— 既看不到「有没有代理」，也看不到「代理了什么」。
+        //
+        // 现在每一笔都记：方法 + 路径 + 状态 + 是否被拦（x-block-by）+
+        // **实际使用的身份（userid）**。这样一跑就能判定：
+        //   · 有日志 → 代理生效了，看 status 就知道是 401（身份）还是 417（sign）
+        //   · 无日志 → 请求压根没进代理，问题在 WebView/shouldInterceptRequest 侧
+        val userId = resp.request.header("Cookie")
+            ?.split(";")
+            ?.firstOrNull { it.trim().startsWith("userid=") }
+            ?.trim()
+            ?: "无"
+        val msg = "H5 ${resp.request.method} ${resp.request.url.encodedPath} → $code" +
+            (blockBy?.let { " [x-block-by: $it]" } ?: "") +
+            " sign=${resp.request.url.queryParameter(PARAM_SIGN)?.take(8) ?: "无"}" +
+            " did=${resp.request.header("x-shepherd-did") ?: "无"}" +
+            " $userId"
+        if (code >= 400 || blockBy != null) {
+            AppLogger.w(TAG, "$msg body=${bytes.decodeToString().take(160)}")
+        } else {
+            AppLogger.i(TAG, msg)
         }
 
         val contentType = resp.header("Content-Type") ?: "application/octet-stream"

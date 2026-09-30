@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import cn.apixiaoyuan.app.core.log.AppLogger
 import cn.apixiaoyuan.app.core.navigation.AppNavController
 import cn.apixiaoyuan.app.core.design.component.AppScaffold
+import cn.apixiaoyuan.app.core.design.component.AutoFollowScrollLazy
 import cn.apixiaoyuan.app.core.design.component.LocalScrollBottomLimit
 import cn.apixiaoyuan.app.core.design.component.LocalTopBarInset
 import top.yukonga.miuix.kmp.basic.Card
@@ -135,46 +136,9 @@ fun LogScreen(navController: AppNavController) {
     }
 
     val listState = rememberLazyListState()
-
-    /*
-     * ★ 2026-09-30：日志滚动改「丝滑跟随」——不再是瞬间跳到底。
-     *
-     * 旧行为：`scrollToItem(lastIndex)` 是**瞬移**，新日志一来画面直接跳到最底，
-     * 观感生硬（用户形容「直接显示最新」）。
-     *
-     * 新行为：用 `animateScrollToItem` 做**位移动画** —— 发一条新日志就向下
-     * 平滑滚一段。三条准则：
-     *
-     *  1. **首次进入/切换过滤条件**（条目从 0 → N）用瞬移：此时做动画没有意义，
-     *     而且会让用户先看到顶部再滚一大段（很怪）。
-     *  2. **增量追加**（N → N+k，比如来了 1 条新日志）用平滑动画：这正是用户要的
-     *     「发一条新日志就有向下滚动的动画」。
-     *  3. **用户手动滚动时不要抢**：若用户正在往回翻看历史，新日志不该把他拽回去。
-     *     判据：只有当列表已接近底部（最后一条可见）时才自动跟随。
-     */
-    val atBottom by remember {
-        derivedStateOf {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()
-            last == null || last.index >= listState.layoutInfo.totalItemsCount - 2
-        }
-    }
-    var lastCount by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(entries.size, rawCrash.length) {
-        val target = if (entries.isNotEmpty()) entries.lastIndex else 0
-        val count = if (entries.isNotEmpty()) entries.size else (if (rawCrash.isNotEmpty()) 1 else 0)
-        when {
-            // ① 清空 / 切换过滤条件（或首次进入）→ 瞬移，不做动画。
-            lastCount == 0 || count <= lastCount -> {
-                if (count > 0) listState.scrollToItem(target)
-            }
-            // ② 增量追加，且用户本就停在底部 → 平滑滚到最新（丝滑跟随）。
-            atBottom -> listState.animateScrollToItem(target)
-            // ③ 用户正在看历史（不在底部）→ 不打扰，只记录条数。
-            else -> Unit
-        }
-        lastCount = count
-    }
+    // 自动跟随滚动（用户语义：到底跟随 / 上滑暂停 / 回底恢复 / 全程动画）。
+    // 复用通用组件，与练习页共用同一套判定。
+    AutoFollowScrollLazy(lazyState = listState, itemCount = entries.size)
 
     AppScaffold(title = "日志", onBack = null) { pad ->
         val topInset = LocalTopBarInset.current
