@@ -169,7 +169,26 @@ object ScorePump {
         return Result.success(after - (before ?: after))
     }
 
-    /** 读当前周练**经验**（`homepage.curWeekExp`）；失败返回 null。 */
+    /**
+     * 读当前**周分数**（`rank/pre-fetch.curWeekScore`）—— 刷分上报真正会变的那个数。
+     *
+     * ★★ 2026-10-01 真机实测纠正（此前的 `curWeekExp` 是**误判**）：
+     *
+     * 用真 cookie 同时打了两个接口（`tools/probe-score-endpoints.js`）：
+     *
+     * ```
+     * GET /leo-star/android/exercise/homepage
+     *   → {"curWeekExp":0, "todayObtainedPoints":0, "curRank":1, "continuousDays":5, ...}
+     * GET /leo-star/android/exercise/rank/pre-fetch
+     *   → {"curWeekScore":846410, "curRank":1, ...}
+     * ```
+     *
+     * `curWeekExp` **恒为 0**，真正的分数是 `curWeekScore`（846410）——
+     * 这正是用户看到的「**分数/排名始终显示 0**」的根因。
+     * pk-node 侧一直用的就是 `curWeekScore`，是**移植时改错了**。
+     *
+     * 于是这里统一改回 `curWeekScore`，与 pk-node 的 `readScore()` 完全一致。
+     */
     private suspend fun readScore(): Int? =
-        runCatching { ExerciseRepository.fetchExerciseHomepage()?.curWeekExp }.getOrNull()
+        runCatching { ExerciseRepository.fetchExp()?.curWeekScore }.getOrNull()
 }

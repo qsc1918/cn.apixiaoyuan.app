@@ -93,9 +93,11 @@ fun AccountStatsScreen(
 
             // ---- 分数区 ----
             StatCard(title = "分数") {
-                StatRow("本周经验（curWeekExp）★", viewModel.curWeekExp, "刷分上报加的就是它")
-                StatRow("今日获得积分", viewModel.todayPoints, "直接刷分的产物")
-                StatRow("周排行榜分数（curWeekScore）", viewModel.curWeekScore, "排行榜口径，与上面不是一回事")
+                // ★ 2026-10-01 真机实测：`curWeekScore` 才是真分数（846410）；
+                //   `curWeekExp` 实测**恒为 0**，降级为参考项。
+                StatRow("周分数（curWeekScore）★", viewModel.curWeekScore, "刷分上报加的就是它")
+                StatRow("今日获得积分", viewModel.todayPoints, "今天已入账的积分")
+                StatRow("本周经验（curWeekExp）", viewModel.curWeekExp, "实测恒为 0，仅供参考")
             }
 
             // ---- 打卡 / 排名区 ----
@@ -168,11 +170,11 @@ fun AccountStatsScreen(
                         color = MiuixTheme.colorScheme.onSurfaceContainerHigh,
                     )
                     Text(
-                        text = "· 「本周经验」是练习/刷分累计的经验，刷分的读数看它。",
+                        text = "· 「周分数」（curWeekScore）是刷分上报真正会变的数，看它。",
                         color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                     )
                     Text(
-                        text = "· 「周排行榜分数」是排行榜口径，刷分不会改变它 —— 两者别混。",
+                        text = "· 「本周经验」（curWeekExp）实测恒为 0，不要拿它当分数。",
                         color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                     )
                     Text(

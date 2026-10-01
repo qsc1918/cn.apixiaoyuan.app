@@ -90,9 +90,14 @@ class ScorePumpViewModel : ViewModel() {
     /**
      * 刷新当前分数。
      *
-     * 读的是 `homepage.curWeekExp`（**练习经验**）—— 与刷分上报的记账口径一致；
-     * 不是 `rank/pre-fetch.curWeekScore`（那是排行榜分数，刷分不会动它，
-     * 用它会表现为「分数显示异常」）。
+     * ★★ 2026-10-01 真机实测纠正：读 **`rank/pre-fetch.curWeekScore`**。
+     *
+     * 此前读 `homepage.curWeekExp` 是**误判** —— 真机两接口对照：
+     * ```
+     * homepage   → curWeekExp = 0        （恒 0！）
+     * pre-fetch  → curWeekScore = 846410 （真分数）
+     * ```
+     * 这就是「分数始终显示 0」的根因。pk-node 一直用 `curWeekScore`，移植时改错了。
      *
      * 失败时把原因写进 [scoreError]（UI 展示），**不清空** [currentScore] ——
      * 已经读到过分数的话，一次刷新失败不该让界面退回「—」。
@@ -102,13 +107,14 @@ class ScorePumpViewModel : ViewModel() {
         loadingScore = true
         scoreError = null
         viewModelScope.launch {
+            val exp = runCatching { ExerciseRepository.fetchExp() }.getOrNull()
             val home = runCatching { ExerciseRepository.fetchExerciseHomepage() }.getOrNull()
             loadingScore = false
-            if (home == null) {
+            if (exp == null && home == null) {
                 scoreError = "读取当前分数失败（登录态失效或网络异常）"
             } else {
-                currentScore = home.curWeekExp
-                todayPoints = home.todayObtainedPoints
+                currentScore = exp?.curWeekScore
+                todayPoints = home?.todayObtainedPoints
             }
         }
     }

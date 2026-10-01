@@ -96,6 +96,18 @@ class AccountStatsViewModel : ViewModel() {
         error = null
         job = viewModelScope.launch {
             // 并行拉三路，各自 runCatching 兜底（失败返回 null，不抛）。
+            // ★★ 2026-10-01 真机实测纠正（先前的字段名取舍是**误判**）：
+            //
+            // 用真 cookie 同时打两个接口，拿到的事实是：
+            //
+            //   GET /leo-star/android/exercise/homepage
+            //     → {"curWeekExp":0, "todayObtainedPoints":0, "curRank":1, "continuousDays":5, ...}
+            //   GET /leo-star/android/exercise/rank/pre-fetch
+            //     → {"curWeekScore":846410, "curRank":1, ...}
+            //
+            //  ⇒ **`curWeekExp` 恒为 0** —— 它就是用户看到的「分数显示 0」的来源；
+            //     真分数是 `pre-fetch.curWeekScore`（846410）。pk-node 一直用后者。
+            //  ⇒ `curRank` 两个接口都给 1，取 homepage 的即可。
             val homepage = runCatching { ExerciseRepository.fetchExerciseHomepage() }.getOrNull()
             val exp = runCatching { ExerciseRepository.fetchExp() }.getOrNull()
             val taskInfo = runCatching { ExerciseRepository.fetchTasks() }.getOrNull()
@@ -107,12 +119,14 @@ class AccountStatsViewModel : ViewModel() {
             }
 
             homepage?.let { h ->
+                // ⚠️ `h.curWeekExp` 实测**恒为 0**，只作参考展示（真分数看 curWeekScore）。
                 curWeekExp = h.curWeekExp
                 todayPoints = h.todayObtainedPoints
                 continuousDays = h.continuousDays
                 curRank = h.curRank
                 nextMultiplier = h.nextMultiplier
             }
+            // ★ 真分数（周分数）—— 这是「分数显示 0」修复的关键。
             exp?.let { e -> curWeekScore = e.curWeekScore }
             tasks = taskInfo?.tasks.orEmpty().map { t ->
                 TaskRow(
