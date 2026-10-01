@@ -693,6 +693,16 @@ class PkWebViewBridge(
     private fun respond(payload: String?, resultB64: String) {
         val cb = extractCallback(payload) ?: return
         if (!cb.matches(Regex("[A-Za-z0-9_$]+"))) return
+        // ★★ 2026-09-30：**万能桥调用探针**。
+        //
+        // H5 的桥调用器生成的**回调名就是方法名**（`index-legacy` 里
+        // `lt(t)` / `lt(t + "_callback")`，`t` = 方法名；真机实测回调名形如
+        // `common_getUserInfo`）。所以在 `respond` 这一个收敛点打一行，
+        // 就能把**每一个**被调用的桥方法都记下来 —— 不必逐个方法插日志。
+        //
+        // 这对「PK 页面初始化卡在哪一步」是决定性的：桥是 H5 初始化的
+        // 唯一外部依赖，把调用序列按时间排出来，卡点一目了然。
+        AppLogger.d(TAG_BRIDGE, "cb=$cb (len=${resultB64.length})")
         main.post {
             runCatching {
                 webView.evaluateJavascript("window['$cb'] && window['$cb']('$resultB64')", null)
