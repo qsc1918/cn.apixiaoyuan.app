@@ -10,6 +10,7 @@ import android.widget.Toast
 import cn.apixiaoyuan.app.BuildConfig
 import cn.apixiaoyuan.app.core.log.AppLogger
 import cn.apixiaoyuan.app.core.native.ContentBridge
+import cn.apixiaoyuan.app.core.pk.PkProtocol
 import cn.apixiaoyuan.app.core.session.SessionStore
 import cn.apixiaoyuan.app.core.sign.SignComputer
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -855,7 +856,8 @@ class PkWebViewBridge(
         }
         // sign 输入是 path（不含 query），放最后只为日志里醒目 —— 与拦截器一致。
         if (url.queryParameter(PARAM_SIGN) == null) {
-            SignComputer.sign(url.encodedPath)?.let { builder.addQueryParameter(PARAM_SIGN, it) }
+            // PK 路径要用 PK 版签名资产（version 3.143.1）—— 用练习版会 417。
+            SignComputer.signForPath(url.encodedPath)?.let { builder.addQueryParameter(PARAM_SIGN, it) }
         }
         return builder.build().toString()
     }
@@ -863,23 +865,18 @@ class PkWebViewBridge(
     /**
      * 公共查询参数（逐字对齐原版真机请求；与 CommonQueryInterceptor 保持同源）。
      *
-     * ★ 2026-09-30：按端点区分 —— `/leo-game-pk/...`（PK）用 631 + `_appId=6` +
-     * `version=3.141.1`，其余用 611 + 主域版本。见 [PK_PRODUCT_ID]（记忆 #36：611 → 401）。
+     * ★★ 2026-10-02：`/leo-game-pk/...`（PK）改为**直接取用** [PkProtocol.COMMON_QUERY]
+     * —— 与原生刷局链路共用唯一一份真机口径表（`611` 不带 `_appId` + `version=3.143.1`
+     * + `android35` + `fenbi` + `110/1.78`，**不带 `isBackground`**）。
+     *
+     * 旧口径（`631` + `_appId=6` + `version=3.141.1` + `UC/150/2.17`）是「`611` → 401」
+     * 那条结论的产物；换整套真机参数后 `611` 正常放行 —— 401 的真因是参数异构。
+     *
+     * 其余主域端点仍用 611 + 主域版本。
      */
     private fun commonParams(path: String): List<Pair<String, String>> {
         val isPk = path.contains("/leo-game-pk/")
-        return if (isPk) listOf(
-            PARAM_PRODUCT_ID to PK_PRODUCT_ID,
-            PARAM_APP_ID to PK_APP_ID,
-            PARAM_PLATFORM to "android${android.os.Build.VERSION.SDK_INT}",
-            PARAM_VERSION to PK_VERSION,
-            PARAM_VENDOR to "UC",
-            PARAM_AV to "5",
-            PARAM_DEVICE_CATEGORY to "phone",
-            PARAM_WEBVIEW_VERSION to "150",
-            PARAM_WH_RATIO to "2.17",
-            PARAM_IS_BACKGROUND to "0",
-        ) else listOf(
+        return if (isPk) PkProtocol.COMMON_QUERY else listOf(
             PARAM_PRODUCT_ID to PRODUCT_ID,
             PARAM_PLATFORM to "android${android.os.Build.VERSION.SDK_INT}",
             PARAM_VERSION to cn.apixiaoyuan.app.BuildConfig.VERSION_NAME,
@@ -977,12 +974,8 @@ class PkWebViewBridge(
         /** 小猿口算产品号。真机抓包逐字：`hostProductId("611")`。 */
         const val PRODUCT_ID = "611"
 
-        // ---- PK 端点专属（★ 2026-09-30，对齐 pk-node / 记忆 #36） ----
-        /** PK 端点 `_productId`。611 → 401（SolarAuthFilter），631 → 200。 */
-        const val PK_PRODUCT_ID = "631"
-        /** PK 端点 `_appId`。原版 PK 请求恒带。 */
-        const val PK_APP_ID = "6"
-        /** PK 端点的协议版本口径（主域其余接口用 3.140.1）。 */
-        const val PK_VERSION = "3.141.1"
+        // PK 端点专属参数已移除（2026-10-02）——
+        // 现在统一取 [cn.apixiaoyuan.app.core.pk.PkProtocol.COMMON_QUERY]，
+        // 避免「原生 / H5 各写一份、改一边忘一边」。见 commonParams() 的 KDoc。
     }
 }

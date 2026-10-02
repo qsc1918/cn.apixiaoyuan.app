@@ -32,18 +32,25 @@ object PkRepository {
     private const val PK_H5_PATH = "/bh5/leo-web-oral-pk/pk.html#/"
 
     /**
-     * PK 入口 URL 的**公共参数**（★ 2026-09-30）。
+     * PK 入口 URL 的**公共参数**。
      *
      * 原版真机打开这个 H5 时，URL 上并非裸路径，而是带了一组 PK 专属参数；
-     * 服务端（SolarAuthFilter）会据此做产品校验 —— **缺 `_productId=631` 恒 401**
-     * （记忆 #36：611 → 401，631 → 200）。
+     * 服务端（SolarAuthFilter）会据此做产品校验 —— 缺了恒 401。
      *
-     * 浏览器直连模式（H5 自己发请求、未经我们的原生代发）时，这组参数就是
-     * 唯一的产品标识来源，所以必须挂在入口 URL 上。
+     * ## ★ 2026-10-02：改为取 [PkProtocol.COMMON_QUERY]（真机口径）
+     *
+     * 旧值是 `_productId=631&_appId=6&version=3.141.1&isBackground=0` ——
+     * 「`611` → 401、`631` → 200」那条结论的产物。pk-node 最新实测表明：
+     * 401 的真因是**整套参数异构**（`version=3.141.1` + `UC/150/2.17` 等），
+     * 换成真机逐字口径后 `_productId=611` 正常放行。
+     *
+     * 现在全工程只有一份 PK 公共参数表（[PkProtocol.COMMON_QUERY]），
+     * 原生刷局 / H5 代理 / 这个入口 URL 三处共用。
      *
      * 注意 `#` 之后是 SPA 的 hash 路由，参数必须放在 `#` **之前**。
      */
-    private const val PK_H5_QUERY = "?_productId=631&_appId=6&version=3.141.1&isBackground=0"
+    private val PK_H5_QUERY: String =
+        "?" + PkProtocol.COMMON_QUERY.joinToString("&") { "${it.first}=${it.second}" }
 
     /**
      * 拼 PK 入口完整 URL。

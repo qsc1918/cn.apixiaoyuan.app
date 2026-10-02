@@ -79,16 +79,18 @@ class CommonQueryInterceptor(
         // 逐参数判断「缺哪个补哪个」，而不是「URL 已带 _productId 就整段跳过」。
         //
         // 为什么这样改（2026-09-26 PK 提交 401 修复）：
-        // PK 接口（`/leo-game-pk/...`）要求 `_productId=631`（区别于练习的 611），
-        // 所以 PkBattleApiService 每个方法都**显式**带 `_productId=631&_appId=6&version=3.141.1`。
-        // 旧实现看到 URL 已带 `_productId` 就整段跳过，导致 PK 提交**也缺了
-        // sign / platform / vendor / av / deviceCategory / webviewVersion / whRatio /
-        // isBackground**，服务端 401 `SolarAuthFilter`（本地实测：提交接口缺 sign
-        // 就 401，补齐全套才进业务层）。
+        // 一部分接口会**显式**带自己的 `_productId` / `version`（例如主域里
+        // 口径不同的端点）。旧实现看到 URL 已带 `_productId` 就整段跳过，导致
+        // 这些请求**也缺了 sign / platform / vendor / av / deviceCategory /
+        // webviewVersion / whRatio / isBackground**，服务端 401 `SolarAuthFilter`
+        // （本地实测：提交接口缺 sign 就 401，补齐全套才进业务层）。
         //
-        // 逐参数判断后：PK 显式带的 631/6/version=3.141.1 原样保留（不会被动成
-        // 611/0.1.0），而它缺的 sign/platform/vendor/... 会被补上 —— 正好满足
-        // PK 提交「631 + 全套公共参数 + sign」的协议要求。
+        // 逐参数判断后：显式带的 `_productId` / `version` 原样保留（不会被动成
+        // 611 / App 自己的版本），而它缺的 sign/platform/vendor/... 会被补上。
+        //
+        // ⚠️ 例外（2026-10-02）：PK（`/leo-game-pk/...`）**不走这里** ——
+        // 它改由 `core/pk/PkRawApi` 用专用 OkHttp + `core/pk/PkProtocol` 发，
+        // 本拦截器根本不会看到 PK 请求（两个 client 是分开的）。
         var changed = false
 
         /**
@@ -104,7 +106,7 @@ class CommonQueryInterceptor(
          * `addQueryParameter` 是**追加**，所以不能靠 add 把它挪到最前 ——
          * 必须先把 query 清空（`query(null)`），再按
          * 「`_productId` 领先、其余保持原顺序」重建。
-         * 已带 `_productId` 的（如 PK 显式传 631）保留其**值**、只改位置。
+         * 已带 `_productId` 的（例如某些端点显式传自己的产品号）保留其**值**、只改位置。
          */
         val originalNames = url.queryParameterNames
         val orderedParams = ArrayList<Pair<String, String>>(originalNames.size + 1)
@@ -143,7 +145,9 @@ class CommonQueryInterceptor(
         // sign 最后补：算法输入是 url.encodedPath()（只有 path，不含 query），
         // 因此顺序不影响 sign 本身；放最后只是为了让抓包日志里 sign 醒目。
         if (url.queryParameter(PARAM_SIGN) == null && url.encodedPath !in SIGN_EXCLUDED_PATHS) {
-            val sign = SignComputer.sign(url.encodedPath)
+            // signForPath：`/leo-game-pk/...` 用 PK 版资产，其余用练习版
+            // （两套资产的 T 不同，用错一律 417 —— 见 SignComputer.Variant）。
+            val sign = SignComputer.signForPath(url.encodedPath)
             if (sign != null) {
                 builder.addQueryParameter(PARAM_SIGN, sign)
                 changed = true

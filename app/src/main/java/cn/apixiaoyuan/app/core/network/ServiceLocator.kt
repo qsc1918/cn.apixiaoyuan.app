@@ -7,7 +7,6 @@ import cn.apixiaoyuan.app.core.network.api.LeoGatewayService
 import cn.apixiaoyuan.app.core.network.api.LeoMathApiService
 import cn.apixiaoyuan.app.core.network.api.LeoOralApiService
 import cn.apixiaoyuan.app.core.network.api.LeoPoemsParadiseApiService
-import cn.apixiaoyuan.app.core.pk.PkBattleApiService
 import cn.apixiaoyuan.app.core.network.api.LeoProfileApiService
 import cn.apixiaoyuan.app.core.network.api.LeoShareApiService
 import cn.apixiaoyuan.app.core.network.api.LeoUserApiService
@@ -83,10 +82,19 @@ object ServiceLocator {
         RetrofitFactory.leo(LeoPoemsParadiseApiService::class.java)
     }
 
-    /** PK 秒结算/循环/并发（`/leo-game-pk/android/...`，主域、_productId=631）。 */
-    val pkBattle: PkBattleApiService by lazy {
-        RetrofitFactory.leo(PkBattleApiService::class.java)
-    }
+    /**
+     * ~~PK 秒结算/循环/并发~~ **已移除**（2026-10-02）。
+     *
+     * PK 链路改走 [cn.apixiaoyuan.app.core.pk.PkRawApi]（裸 OkHttp + 专用协议表
+     * [cn.apixiaoyuan.app.core.pk.PkProtocol]），不再经过本文件的 Retrofit。
+     *
+     * 原因：这里挂的 `CommonQueryInterceptor` / `HeaderInterceptor` /
+     * `AuthInterceptor` 全是**主域**纪律（`_productId=611` + `android<本机SDK>`
+     * + `vendor=UC` + `isBackground=0` + `Leo/…` UA + `YFD_U`），而 PK 要的是
+     * 另一套（`611` 不带 `_appId` + `android35` + `fenbi` + 不带 `isBackground`
+     * + H5 WebView UA + 不带 `YFD_U`）。与其在全局拦截器里塞「如果是 PK 就跳过」
+     * 的分支把两套协议搅在一起，不如给 PK 一条干净的专用 client。
+     */
 
     val shepherd: ShepherdApiService by lazy {
         RetrofitFactory.leo(ShepherdApiService::class.java)

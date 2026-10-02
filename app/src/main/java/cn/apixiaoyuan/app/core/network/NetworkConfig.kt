@@ -31,8 +31,11 @@ object NetworkConfig {
      *  - 逐项 A/B：`version=3.141.1` → 417，`version=3.140.1` → 200；
      *  - pk-node 侧同结论（README 4.7/4.10）。
      *
-     * ⚠️ 例外：PK 接口（`/leo-game-pk/...`）自带 `version=3.141.1&_productId=631&_appId=6`，
-     * 那是它自己的口径，本拦截器不会覆盖已存在的参数。
+     * ⚠️ 例外：PK 接口（`/leo-game-pk/...`）**完全不经过本参数体系**（2026-10-02 起）
+     * —— 它由 [cn.apixiaoyuan.app.core.pk.PkProtocol] 提供真机口径
+     * （`version=3.143.1` + `_productId=611` + `platform=android35` + `vendor=fenbi` …），
+     * 并通过 [cn.apixiaoyuan.app.core.pk.PkRawApi] 用独立 OkHttp 发出，
+     * 本常量与 `CommonQueryInterceptor` 都碰不到它。
      */
     const val LEO_PROTOCOL_VERSION = "3.140.1"
 

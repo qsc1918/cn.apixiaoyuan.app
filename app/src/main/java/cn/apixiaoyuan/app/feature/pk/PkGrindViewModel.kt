@@ -107,13 +107,24 @@ class PkGrindViewModel : ViewModel() {
         }
     }
 
+    /**
+     * 开始刷局。
+     *
+     * 默认值全部对齐 pk-node（2026-10-02 移植）：
+     * **不再预防性等 60 秒出题冷却** —— 换到 `match/v2` + `611` 之后出题立刻就通，
+     * 那个 400 是旧协议被服务端按频控处理的产物。撞到 400/403 才按
+     * [matchRetryIntervalMs] 自动重试；[roundIntervalMs] 只是下限，默认 0。
+     */
     fun start(
         rounds: Int,
         pointId: Int,
         costTimeMs: Long?,
-        submitDelayMs: Long,
-        roundIntervalMs: Long,
-        rateLimitWaitMs: Long = 60_000L,
+        submitDelayMinMs: Long = PkBattleEngine.DEFAULT_SUBMIT_DELAY_MIN_MS,
+        submitDelayMaxMs: Long = PkBattleEngine.DEFAULT_SUBMIT_DELAY_MAX_MS,
+        roundIntervalMs: Long = PkBattleEngine.DEFAULT_ROUND_INTERVAL_MS,
+        rateLimitWaitMs: Long = PkBattleEngine.RATE_LIMIT_BASE_MS,
+        matchRetryIntervalMs: Long = PkBattleEngine.MATCH_RETRY_INTERVAL_MS,
+        matchRetryMaxMs: Long = PkBattleEngine.MATCH_RETRY_MAX_MS,
         strokeMode: PkStrokeMode,
     ) {
         if (running) return
@@ -132,23 +143,35 @@ class PkGrindViewModel : ViewModel() {
 
         job = viewModelScope.launch {
             try {
+                // 记下最后一条事件：失败时把它带进结果文案。
+                // 否则「完成 0/10 局」这种结果完全没有信息量 —— 用户看不到
+                // 是 417 还是频控还是编码器没装载（2026-10-02 的排查教训）。
+                var lastEvent = ""
                 val result = PkBattleEngine.runBattle(
                     rounds = rounds,
                     modes = setOf(PkMode.MATH),
                     pointId = pointId,
                     costTimeMs = costTimeMs,
-                    submitDelayMs = submitDelayMs,
+                    submitDelayMinMs = submitDelayMinMs,
+                    submitDelayMaxMs = submitDelayMaxMs,
                     roundIntervalMs = roundIntervalMs,
                     rateLimitBaseMs = rateLimitWaitMs,
+                    matchRetryIntervalMs = matchRetryIntervalMs,
+                    matchRetryMaxMs = matchRetryMaxMs,
                     strokeMode = strokeMode,
                     onProgress = { _, done, total, ev ->
+                        lastEvent = ev
                         progress = "[数学] $ev（$done/$total）"
                     },
                 )
                 running = false
                 progress = ""
                 val done = result[PkMode.MATH] ?: 0
-                message = "结束：完成 $done/$rounds 局"
+                message = if (done >= rounds) {
+                    "结束：完成 $done/$rounds 局"
+                } else {
+                    "结束：完成 $done/$rounds 局｜最后一条：$lastEvent"
+                }
                 refreshScoreOnly()
             } catch (c: CancellationException) {
                 running = false

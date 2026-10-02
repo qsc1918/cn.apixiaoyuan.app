@@ -36,19 +36,27 @@ fun PkGrindScreen(
 ) {
     var roundsText by remember { mutableStateOf("1") }
     var costTimeText by remember { mutableStateOf("") }
-    var submitDelayText by remember { mutableStateOf("0") }
+    // 出题成功 → 提交 的间隔区间。默认 8~12s（对齐 pk-node：真人要看题、写答案再交卷）。
+    var submitDelayMinText by remember { mutableStateOf("8000") }
+    var submitDelayMaxText by remember { mutableStateOf("12000") }
+    // 循环间隔：默认 0 —— **不再预防性等 60 秒**（见页面底部「说明」）。
     var roundIntervalText by remember { mutableStateOf("0") }
     var selectedPointId by remember { mutableStateOf(0) }
     var strokeMode by remember { mutableStateOf(PkStrokeMode.ARC) }
-    // 频控退避基数（毫秒）。默认 60s —— 提交接口频控窗口约十分钟量级，
-    // 短于此的重试没有意义（待办 16 实证）。
-    var rateLimitWaitText by remember { mutableStateOf("60000") }
+    // 提交频控退避基数（毫秒）。默认 10s（pk-node 实测：60s 是拍脑袋，10s×2 就够）。
+    var rateLimitWaitText by remember { mutableStateOf("10000") }
+    // 出题撞 400/403 时的自动重试：间隔 / 累计上限。
+    var matchRetryIntervalText by remember { mutableStateOf("10000") }
+    var matchRetryMaxText by remember { mutableStateOf("120000") }
 
     val rounds = roundsText.toIntOrNull() ?: 0
     val costTimeMs = costTimeText.toLongOrNull()
-    val submitDelayMs = submitDelayText.toLongOrNull() ?: 0L
+    val submitDelayMinMs = submitDelayMinText.toLongOrNull() ?: 0L
+    val submitDelayMaxMs = submitDelayMaxText.toLongOrNull() ?: 0L
     val roundIntervalMs = roundIntervalText.toLongOrNull() ?: 0L
-    val rateLimitWaitMs = rateLimitWaitText.toLongOrNull() ?: 60_000L
+    val rateLimitWaitMs = rateLimitWaitText.toLongOrNull() ?: 10_000L
+    val matchRetryIntervalMs = matchRetryIntervalText.toLongOrNull() ?: 10_000L
+    val matchRetryMaxMs = matchRetryMaxText.toLongOrNull() ?: 120_000L
 
     AppScrollScaffold(title = "刷 PK 对局", onBack = { navController.popBackStack() }) {
         Column(
@@ -159,22 +167,40 @@ fun PkGrindScreen(
                     onValueChange = { costTimeText = it.filter(Char::isDigit) },
                 )
                 NumberField(
-                    title = "出题后提交间隔（毫秒）",
-                    value = submitDelayText,
-                    placeholder = "如 0",
-                    onValueChange = { submitDelayText = it.filter(Char::isDigit) },
+                    title = "出题后提交间隔 · 下界（毫秒）",
+                    value = submitDelayMinText,
+                    placeholder = "如 8000",
+                    onValueChange = { submitDelayMinText = it.filter(Char::isDigit) },
                 )
                 NumberField(
-                    title = "循环间隔（毫秒）",
+                    title = "出题后提交间隔 · 上界（毫秒）",
+                    value = submitDelayMaxText,
+                    placeholder = "如 12000",
+                    onValueChange = { submitDelayMaxText = it.filter(Char::isDigit) },
+                )
+                NumberField(
+                    title = "循环间隔（毫秒，默认 0 = 不等）",
                     value = roundIntervalText,
                     placeholder = "每局之间，如 0",
                     onValueChange = { roundIntervalText = it.filter(Char::isDigit) },
                 )
                 NumberField(
-                    title = "频控退避（毫秒，默认 60000）",
+                    title = "提交频控退避（毫秒，默认 10000）",
                     value = rateLimitWaitText,
-                    placeholder = "命中 403/429 后等待多久再试",
+                    placeholder = "提交命中 403/429 后等待多久再试",
                     onValueChange = { rateLimitWaitText = it.filter(Char::isDigit) },
+                )
+                NumberField(
+                    title = "出题频控重试间隔（毫秒，默认 10000）",
+                    value = matchRetryIntervalText,
+                    placeholder = "出题撞 400/403 后隔多久再试",
+                    onValueChange = { matchRetryIntervalText = it.filter(Char::isDigit) },
+                )
+                NumberField(
+                    title = "出题最长等待（毫秒，默认 120000）",
+                    value = matchRetryMaxText,
+                    placeholder = "累计超此时长才判该轮失败",
+                    onValueChange = { matchRetryMaxText = it.filter(Char::isDigit) },
                 )
                 Text(
                     text = "画笔算法",
@@ -207,9 +233,12 @@ fun PkGrindScreen(
                                 rounds = rounds,
                                 pointId = selectedPointId,
                                 costTimeMs = costTimeMs,
-                                submitDelayMs = submitDelayMs,
+                                submitDelayMinMs = submitDelayMinMs,
+                                submitDelayMaxMs = submitDelayMaxMs,
                                 roundIntervalMs = roundIntervalMs,
                                 rateLimitWaitMs = rateLimitWaitMs,
+                                matchRetryIntervalMs = matchRetryIntervalMs,
+                                matchRetryMaxMs = matchRetryMaxMs,
                                 strokeMode = strokeMode,
                             )
                         }
@@ -244,9 +273,15 @@ fun PkGrindScreen(
                         color = MiuixTheme.colorScheme.onSurfaceContainerHigh,
                     )
                     Text(
-                        text = "纯 API 刷局：出题（旧版明文 match）→ 弧线笔迹组装 body → " +
-                            "gzip+原生加密 → sign → 提交。提交接口有独立频控（约数分钟级），" +
-                            "连续刷局过快会被 400/403 拦截，建议循环间隔 ≥ 5 分钟。",
+                        text = "纯 API 刷局：出题（match/v2，加密响应，本地解包）→ 弧线笔迹组装 body → " +
+                            "gzip+原生加密 → sign → 提交 → 结算核对。",
+                        color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
+                    )
+                    Text(
+                        text = "★ 2026-10-02 起**不再预防性等 60 秒**：旧协议（631 + 明文 match）" +
+                            "被服务端按频控处理，才表现为「每账号 60 秒一局」。换到 611 + match/v2 " +
+                            "后出题立刻就通，循环间隔默认 0；真撞到 400/403 才按「出题频控重试间隔」" +
+                            "自动重试，累计超「出题最长等待」才判该轮失败。",
                         color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                     )
                 }

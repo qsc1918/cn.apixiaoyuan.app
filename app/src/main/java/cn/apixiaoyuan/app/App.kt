@@ -114,9 +114,12 @@ class App : Application() {
         // 任何标注 @NeedEncode 的请求（练习成绩上传 / PK 提交）发出之前就绪。
         // 编码顺序为 gzip 压缩后再走 native c()，与解码侧完全互逆。
         NativeEncodeInstaller.install()
-        // 签名计算器：加载内置 libRequestEncoder.so，按 JNI_OnLoad+0x4078 调 chain。
+        // 签名计算器：加载**两份**签名资产并各自按偏移调 chain ——
+        //   · libRequestEncoder.so   （练习/主域，version 3.140.1）→ chain = JNI_OnLoad+0x4078
+        //   · libRequestEncoderPk.so （PK，      version 3.143.1）→ chain = JNI_OnLoad+0x40A8
         // 必须在 RetrofitFactory.init 之后、任何主域请求之前 —— CommonQueryInterceptor
-        // 依赖它给主域 URL 补 `sign`（缺 sign 一律 417 x-block-by: solar-encoder）。
+        // 依赖它给主域 URL 补 `sign`（缺 sign 一律 417 x-block-by: solar-encoder）；
+        // 而 PK 请求**必须**用 PK 那份资产，用错版本的 T 同样 417（见 SignComputer.Variant）。
         // so 加载失败时静默降级（不补 sign），不阻断启动。
         cn.apixiaoyuan.app.core.sign.SignComputer.init(this)
 

@@ -4,6 +4,7 @@ import android.util.Log
 import cn.apixiaoyuan.app.core.log.AppLogger
 import cn.apixiaoyuan.app.core.network.HeaderInterceptor
 import cn.apixiaoyuan.app.core.network.ShepherdId
+import cn.apixiaoyuan.app.core.pk.PkProtocol
 import cn.apixiaoyuan.app.core.session.SessionStore
 import cn.apixiaoyuan.app.core.sign.SignComputer
 import okhttp3.HttpUrl
@@ -91,24 +92,6 @@ internal object PkH5Proxy {
 
     /** 原版客户端标识（`d.ANDROID`）。 */
     private const val REAL_CLIENT = "android"
-
-    /**
-     * ★★ PK 端点的 `_productId` / `_appId`（2026-09-30，对齐 pk-node 权威结论）
-     *
-     * PK H5 打的全是 `/leo-game-pk/{client}/...`，而归一后即 `/leo-game-pk/android/...`。
-     * 这些端点由 `SolarAuthFilter` 守卫，**硬要求 `_productId=631`**：
-     *  - 记忆 #36（真机实测）：`_productId=611` → **401**；`631` → 200。
-     *  - 与练习链路（611）是**两套口径**，不能混用。
-     *
-     * 此前本类的 `COMMON_PARAMS` 用的是练习的 611，且未带 `_appId` ——
-     * H5 经此代发的所有 PK 请求都会 401 → 页面表现为「加载不出 / 登录态异常」。
-     *
-     * 原版真机 PK 请求恒为 `...&_productId=631&_appId=6&version=3.141.1`。
-     */
-    private const val PK_PRODUCT_ID = "631"
-    private const val PK_APP_ID = "6"
-    /** PK 端点自带的协议版本口径（与主域 3.140.1 不同，见 NetworkConfig 注释）。 */
-    private const val PK_VERSION = "3.141.1"
 
     /**
      * 允许被归正的**模块段**（`api` 段的前一段）。
@@ -274,10 +257,13 @@ internal object PkH5Proxy {
      * 公共参数与 `CommonQueryInterceptor` **同源**（那边供原生 Retrofit，这边供 H5），
      * 改一处记得改另一处。
      *
-     * ★ 2026-09-30：`_productId` 按**端点**区分 ——
-     *  `/leo-game-pk/...`（PK）要 `631` + `_appId=6` + `version=3.141.1`；
+     * ★ 2026-10-02：`_productId` 按**端点**区分 ——
+     *  `/leo-game-pk/...`（PK）用 [PK_COMMON_PARAMS]（真机口径：`611` 不带 `_appId`
+     *  + `version=3.143.1` + `android35` + `fenbi` + `110/1.78`，**不带 `isBackground`**）；
      *  其余主域请求沿用 `611` + `NetworkConfig.LEO_PROTOCOL_VERSION`。
-     *  见 [PK_PRODUCT_ID] 的 KDoc（记忆 #36：611 → 401）。
+     *
+     *  PK 的那份表在 [PkProtocol.COMMON_QUERY]，与原生刷局链路**共用同一份**
+     *  —— 改口径只改一处。
      */
     private fun withSignAndCommonQuery(url: String): String {
         val parsed = url.toHttpUrlOrNull() ?: return url
@@ -302,7 +288,8 @@ internal object PkH5Proxy {
         params.forEach { (k, v) -> if (normalized.queryParameter(k) == null) builder.addQueryParameter(k, v) }
         // sign 的输入是 encodedPath —— **必须在归正之后算**，否则签名与被请求的路径对不上。
         if (normalized.queryParameter(PARAM_SIGN) == null) {
-            SignComputer.sign(normalized.encodedPath)?.let { builder.addQueryParameter(PARAM_SIGN, it) }
+            // PK 路径要用 PK 版签名资产（version 3.143.1）—— 用练习版会 417。
+            SignComputer.signForPath(normalized.encodedPath)?.let { builder.addQueryParameter(PARAM_SIGN, it) }
         }
         return builder.build().toString()
     }
@@ -354,27 +341,28 @@ internal object PkH5Proxy {
     )
 
     /**
-     * PK 端点的公共参数（★ 2026-09-30 新增）。
+     * PK 端点的公共参数。
      *
-     * 与 [COMMON_PARAMS] 的差异只有三点，但每一点都致命：
-     *  - `_productId` = **631**（不是练习的 611）—— 否则 SolarAuthFilter 回 401；
-     *  - `_appId` = **6** —— 原版 PK 请求恒带；
-     *  - `version` = **3.141.1** —— PK 端点自己的口径（主域其余接口用 3.140.1）。
+     * ## ★★ 2026-10-02：改为**直接取用** [PkProtocol.COMMON_QUERY]，不再各写一份
      *
-     * 真机抓包（`auto_oral-2026-09-27.log`）与 pk-node 侧结论一致。
+     * 口径也一并按 pk-node 最新实测修正（原来那份是 `631` + `_appId=6` +
+     * `version=3.141.1` + `UC/150/2.17` + `isBackground=0`）：
+     *
+     * | 项 | 旧 | 新（真机逐字） |
+     * |---|---|---|
+     * | `_productId` / `_appId` | `631` + `6` | **`611`，不带 `_appId`** |
+     * | `version` | `3.141.1` | **`3.143.1`** |
+     * | `platform` / `vendor` | `android<本机SDK>` / `UC` | **`android35` / `fenbi`** |
+     * | `webviewVersion` / `whRatio` | `150` / `2.17` | **`110` / `1.78`** |
+     * | `isBackground` | `0` | **不带** |
+     *
+     * 「`611` → 401」那条旧结论是在**旧参数组合**（`version=3.141.1` 等）下测出来的；
+     * 整套换成真机口径后 `611` 正常放行 —— 401 的真因是参数异构，不是 productId 本身。
+     *
+     * 不再各写一份的原因：这份表与原生刷局链路（[PkProtocol]）必须永远一致，
+     * 两处各写一份的结果就是「原生通了、H5 还是 401」。
      */
-    private val PK_COMMON_PARAMS: List<Pair<String, String>> = listOf(
-        "_productId" to PK_PRODUCT_ID,
-        "_appId" to PK_APP_ID,
-        "platform" to "android${android.os.Build.VERSION.SDK_INT}",
-        "version" to PK_VERSION,
-        "vendor" to "UC",
-        "av" to "5",
-        "deviceCategory" to "phone",
-        "webviewVersion" to "150",
-        "whRatio" to "2.17",
-        "isBackground" to "0",
-    )
+    private val PK_COMMON_PARAMS: List<Pair<String, String>> = PkProtocol.COMMON_QUERY
 
     /** H5 未带 UA 时的兜底（与 [HeaderInterceptor] 同形态）。 */
     private val DEFAULT_UA: String =
